@@ -4,6 +4,7 @@
 //! 支持单凭据 (TokenManager) 和多凭据 (MultiTokenManager) 管理
 
 use anyhow::bail;
+use base64::{Engine as _, engine::general_purpose};
 use chrono::{DateTime, Duration, Utc};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
@@ -136,6 +137,32 @@ pub(crate) fn validate_refresh_token(credentials: &KiroCredentials) -> anyhow::R
 }
 
 /// 刷新 Token
+/// 从 JWT access token 中提取用户邮箱
+/// JWT 格式：header.payload.signature，payload 为 base64url 编码的 JSON
+fn extract_email_from_jwt(token: &str) -> Option<String> {
+    let payload_b64 = token.split('.').nth(1)?;
+    // base64url → base64 standard（补齐 padding）
+    let padded = match payload_b64.len() % 4 {
+        2 => format!("{}==", payload_b64),
+        3 => format!("{}=", payload_b64),
+        _ => payload_b64.to_string(),
+    };
+    let bytes = general_purpose::URL_SAFE_NO_PAD
+        .decode(payload_b64)
+        .or_else(|_| general_purpose::STANDARD.decode(&padded))
+        .ok()?;
+    let payload: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    // 依次尝试常见字段名
+    for key in &["email", "username", "preferred_username", "cognito:username"] {
+        if let Some(v) = payload.get(key).and_then(|v| v.as_str()) {
+            if !v.is_empty() {
+                return Some(v.to_string());
+            }
+        }
+    }
+    None
+}
+
 pub(crate) async fn refresh_token(
     credentials: &KiroCredentials,
     config: &Config,
@@ -217,7 +244,7 @@ async fn refresh_social_token(
     let data: RefreshResponse = response.json().await?;
 
     let mut new_credentials = credentials.clone();
-    new_credentials.access_token = Some(data.access_token);
+    new_credentials.access_token = Some(data.access_token.clone());
 
     if let Some(new_refresh_token) = data.refresh_token {
         new_credentials.refresh_token = Some(new_refresh_token);
@@ -230,6 +257,13 @@ async fn refresh_social_token(
     if let Some(expires_in) = data.expires_in {
         let expires_at = Utc::now() + Duration::seconds(expires_in);
         new_credentials.expires_at = Some(expires_at.to_rfc3339());
+    }
+
+    // 仅在用户未手动设置邮箱时，尝试从 JWT 中提取
+    if new_credentials.email.is_none() {
+        if let Some(email) = extract_email_from_jwt(&data.access_token) {
+            new_credentials.email = Some(email);
+        }
     }
 
     Ok(new_credentials)
@@ -335,7 +369,7 @@ async fn refresh_idc_token(
     let data: IdcRefreshResponse = response.json().await?;
 
     let mut new_credentials = credentials.clone();
-    new_credentials.access_token = Some(data.access_token);
+    new_credentials.access_token = Some(data.access_token.clone());
 
     if let Some(new_refresh_token) = data.refresh_token {
         new_credentials.refresh_token = Some(new_refresh_token);
@@ -344,6 +378,13 @@ async fn refresh_idc_token(
     if let Some(expires_in) = data.expires_in {
         let expires_at = Utc::now() + Duration::seconds(expires_in);
         new_credentials.expires_at = Some(expires_at.to_rfc3339());
+    }
+
+    // 仅在用户未手动设置邮箱时，尝试从 JWT 中提取
+    if new_credentials.email.is_none() {
+        if let Some(email) = extract_email_from_jwt(&data.access_token) {
+            new_credentials.email = Some(email);
+        }
     }
 
     Ok(new_credentials)
