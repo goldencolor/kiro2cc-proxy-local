@@ -191,7 +191,7 @@ export function ApiKeysPanel() {
       data.durationDays = null // 清除懒激活
     }
     updateKey(
-      { id: editingKey.id, data: { ...data, pinnedCredentialId: editPinnedCredentialId } },
+      { id: editingKey.id, data: { ...data, ...(editPinnedCredentialId !== (editingKey?.pinnedCredentialId ?? null) ? { pinnedCredentialId: editPinnedCredentialId } : {}) } },
       {
         onSuccess: () => {
           toast.success('已更新')
