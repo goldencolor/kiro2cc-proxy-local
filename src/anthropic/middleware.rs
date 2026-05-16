@@ -26,6 +26,8 @@ pub struct ApiKeyContext {
     pub id: u32,
     /// 额度限制（美元），None 表示不限额
     pub spending_limit: Option<f64>,
+    /// 绑定的凭据 ID，None 表示使用全局凭据
+    pub pinned_credential_id: Option<u64>,
 }
 
 /// 应用共享状态
@@ -110,6 +112,7 @@ pub async fn auth_middleware(
         request.extensions_mut().insert(ApiKeyContext {
             id: 0,
             spending_limit: None,
+            pinned_credential_id: None,
         });
         return next.run(request).await;
     }
@@ -117,7 +120,7 @@ pub async fn auth_middleware(
     // 2. 尝试子 API Key 认证
     if let Some(manager) = &state.api_key_manager {
         match manager.authenticate(&key) {
-            ApiKeyAuthResult::Valid { id, name, spending_limit } => {
+            ApiKeyAuthResult::Valid { id, name, spending_limit, pinned_credential_id } => {
                 // 懒激活：首次使用时激活 key
                 if let Err(e) = manager.activate_key(id) {
                     tracing::warn!(api_key_id = id, error = %e, "激活 API Key 失败");
@@ -149,6 +152,7 @@ pub async fn auth_middleware(
                 request.extensions_mut().insert(ApiKeyContext {
                     id,
                     spending_limit,
+                    pinned_credential_id,
                 });
                 return next.run(request).await;
             }
