@@ -23,6 +23,7 @@
 - **WebSearch**：内置 WebSearch 工具转换逻辑
 - **Admin 管理**：可选的 Web 管理界面，支持凭据管理、余额查询等
 - **凭据级代理**：支持为每个凭据单独配置 HTTP/SOCKS5 代理
+- **API Key 凭据绑定**：创建 API Key 时可绑定指定凭据，该 Key 的所有请求只使用绑定凭据的 Token，不参与全局调度
 
 ---
 
@@ -551,6 +552,8 @@ Authorization: Bearer your-api-key
 - 调整凭据优先级
 - 查看各账号余额
 - 重置账号失败状态
+- **API Key 管理**：创建 / 编辑 / 删除子 API Key，支持按日期或额度限制
+- **凭据绑定**：创建或编辑 API Key 时可绑定指定凭据，绑定后该 Key 的请求只使用该凭据，不参与全局调度；绑定凭据不可用时返回 503
 
 **Admin API**（需要 `x-api-key` 或 `Authorization: Bearer` 认证）：
 
@@ -560,6 +563,10 @@ Authorization: Bearer your-api-key
 | `/api/admin/credentials` | POST | 添加凭据 |
 | `/api/admin/credentials/:id` | DELETE | 删除凭据 |
 | `/api/admin/credentials/:id/balance` | GET | 查询余额 |
+| `/api/admin/api-keys` | GET | 获取所有子 API Key |
+| `/api/admin/api-keys` | POST | 创建子 API Key |
+| `/api/admin/api-keys/:id` | PUT | 更新子 API Key（含凭据绑定） |
+| `/api/admin/api-keys/:id` | DELETE | 删除子 API Key |
 
 ---
 
