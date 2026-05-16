@@ -842,6 +842,24 @@ impl MultiTokenManager {
         }
     }
 
+    /// 按指定凭据 ID 直接获取 CallContext，不走正常调度
+    ///
+    /// 凭据不存在或已禁用时返回 Err，不重试其他凭据
+    pub async fn acquire_context_for(&self, credential_id: u64) -> anyhow::Result<CallContext> {
+        let credentials = {
+            let entries = self.entries.lock();
+            let entry = entries
+                .iter()
+                .find(|e| e.id == credential_id)
+                .ok_or_else(|| anyhow::anyhow!("Pinned credential #{} not found", credential_id))?;
+            if entry.disabled {
+                anyhow::bail!("Pinned credential #{} is disabled", credential_id);
+            }
+            entry.credentials.clone()
+        };
+        self.try_ensure_token(credential_id, &credentials).await
+    }
+
     /// 切换到下一个优先级最高的可用凭据（内部方法）
     fn switch_to_next_by_priority(&self) {
         let entries = self.entries.lock();
