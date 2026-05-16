@@ -29,6 +29,7 @@
 ## 目录
 
 - [快速开始（新手必读）](#快速开始新手必读)
+- [快捷命令安装](#快捷命令安装)
 - [本地部署（macOS）](#本地部署macos)
 - [本地部署（Windows）](#本地部署windows)
 - [获取 Kiro 凭据](#获取-kiro-凭据)
@@ -59,6 +60,51 @@ kiro2cc-proxy 是一个本地代理服务。它把标准的 Anthropic Claude API
 ```
 安装依赖 → 构建项目 → 启动服务 → 填入凭据 → 配置客户端
 ```
+
+---
+
+## 快捷命令安装
+
+安装后可在任意终端直接使用 `build_kiro2cc_proxy`（构建）和 `run_kiro2cc_proxy`（启动），无需切换到项目目录。
+
+### macOS
+
+```bash
+chmod +x setup-aliases.sh
+./setup-aliases.sh
+```
+
+安装完成后执行 `source ~/.zshrc`（或 `source ~/.bashrc`）使其立即生效。
+
+| 命令 | 说明 |
+|------|------|
+| `build_kiro2cc_proxy` | 构建项目（等同于 `./build-mac.sh`） |
+| `run_kiro2cc_proxy` | 启动服务（等同于 `./run-local-service-mac.sh`） |
+
+> 脚本会自动检测 `~/.zshrc`、`~/.bashrc`、`~/.bash_profile` 并写入，已存在的条目自动跳过，重复运行不会重复写入。
+
+### Windows
+
+以管理员身份打开 PowerShell，先允许执行脚本（仅需一次）：
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+然后运行：
+
+```powershell
+.\setup-aliases.ps1
+```
+
+安装完成后执行 `. $PROFILE` 使其立即生效。
+
+| 命令 | 说明 |
+|------|------|
+| `build_kiro2cc_proxy` | 构建项目（等同于 `.\build-windows.ps1`） |
+| `run_kiro2cc_proxy` | 启动服务（等同于 `.\run-local-service-windows.ps1`） |
+
+> 脚本会自动创建 PowerShell Profile（若不存在），已存在的条目自动跳过，重复运行不会重复写入。
 
 ---
 
