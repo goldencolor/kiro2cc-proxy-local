@@ -246,6 +246,9 @@ pub struct CreateApiKeyRequest {
     /// 有效期天数（懒激活模式）
     #[serde(default)]
     pub duration_days: Option<f64>,
+    /// 绑定的凭据 ID（None 表示不绑定）
+    #[serde(default)]
+    pub pinned_credential_id: Option<u64>,
 }
 
 /// 更新 API Key 请求
@@ -267,6 +270,9 @@ pub struct UpdateApiKeyRequest {
     /// 有效期天数（懒激活模式）
     #[serde(default, deserialize_with = "deserialize_optional_f64")]
     pub duration_days: Option<Option<f64>>,
+    /// 绑定的凭据 ID（外层 None = 不修改，内层 None = 解除绑定）
+    #[serde(default, deserialize_with = "deserialize_optional_u64")]
+    pub pinned_credential_id: Option<Option<u64>>,
 }
 
 /// 区分 JSON 中"字段缺失"与"字段为 null"
@@ -289,6 +295,17 @@ where
     D: serde::Deserializer<'de>,
 {
     Option::deserialize(deserializer).map(Some)
+}
+
+fn deserialize_optional_u64<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<u64>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+    let opt: Option<Option<u64>> = Option::deserialize(deserializer)?;
+    Ok(opt)
 }
 
 /// 错误响应
