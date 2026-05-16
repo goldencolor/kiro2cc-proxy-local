@@ -73,6 +73,10 @@ pub struct KiroCredentials {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub email: Option<String>,
 
+    /// 用户昵称（从 KAM 导出数据获取）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nickname: Option<String>,
+
     /// 订阅等级（KIRO PRO+ / KIRO FREE 等）
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]

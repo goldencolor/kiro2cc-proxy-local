@@ -20,6 +20,8 @@ interface BatchImportDialogProps {
 
 interface CredentialInput {
   refreshToken: string
+  email?: string
+  nickname?: string
   clientId?: string
   clientSecret?: string
   region?: string
@@ -38,6 +40,30 @@ interface VerificationResult {
   credentialId?: number
   rollbackStatus?: 'success' | 'failed' | 'skipped'
   rollbackError?: string
+}
+
+function parseCredentials(raw: string): CredentialInput[] {
+  const parsed = JSON.parse(raw)
+
+  // KAM 导出格式: { accounts: [...] }
+  if (parsed && !Array.isArray(parsed) && Array.isArray(parsed.accounts)) {
+    return parsed.accounts
+      .filter((acc: any) => acc?.credentials?.refreshToken)
+      .map((acc: any) => ({
+        refreshToken: acc.credentials.refreshToken,
+        email: acc.email,
+        nickname: acc.nickname,
+        clientId: acc.credentials.clientId,
+        clientSecret: acc.credentials.clientSecret,
+        region: acc.credentials.region,
+        authRegion: acc.credentials.region,
+        machineId: acc.machineId,
+        priority: acc.priority,
+      }))
+  }
+
+  // 扁平数组或单对象
+  return Array.isArray(parsed) ? parsed : [parsed]
 }
 
 async function sha256Hex(value: string): Promise<string> {
@@ -88,9 +114,8 @@ export function BatchImportDialog({ open, onOpenChange }: BatchImportDialogProps
 
   const handleBatchImport = async () => {
     try {
-      // 1. 解析 JSON
-      const parsed = JSON.parse(jsonInput)
-      let credentials: CredentialInput[] = Array.isArray(parsed) ? parsed : [parsed]
+      // 1. 解析 JSON（支持 KAM 导出格式和扁平格式）
+      let credentials: CredentialInput[] = parseCredentials(jsonInput)
 
       if (credentials.length === 0) {
         toast.error('没有可导入的凭据')
@@ -175,6 +200,8 @@ export function BatchImportDialog({ open, onOpenChange }: BatchImportDialogProps
 
           const addedCred = await addCredential({
             refreshToken: token,
+            email: cred.email?.trim() || undefined,
+            nickname: cred.nickname?.trim() || undefined,
             authMethod,
             authRegion: cred.authRegion?.trim() || cred.region?.trim() || undefined,
             apiRegion: cred.apiRegion?.trim() || undefined,
