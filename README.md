@@ -2,7 +2,7 @@
 
 一个用 Rust 编写的 Anthropic Claude API 兼容代理服务，将 Anthropic API 请求转换为 Kiro API 请求。
 
-> **✅ 支持模型：Claude Sonnet 4.5 / Claude Sonnet 4.6 / Claude Opus 4.5 / Claude Opus 4.6 / Claude Opus 4.7 / Claude Haiku 4.5**
+> **✅ 支持模型：Claude Sonnet 4.5 / Claude Sonnet 4.6 / Claude Opus 4.5 / Claude Opus 4.6 / Claude Opus 4.7 / Claude Haiku 4.5 / DeepSeek 3.2 / GLM-5 / MiniMax M2.5 / MiniMax M2.1 / Qwen3 Coder Next**
 
 [English](README.en.md) | 中文
 
@@ -485,6 +485,12 @@ Authorization: Bearer your-api-key
 | `*opus*`（含 4.7/4-7） | `claude-opus-4.7` |
 | `*opus*`（其他） | `claude-opus-4.6` |
 | `*haiku*` | `claude-haiku-4.5` |
+| `auto` | `auto`（Kiro 智能路由） |
+| `*deepseek*` | `deepseek-3.2` |
+| `*glm*` | `glm-5` |
+| `*minimax*`（含 2.5/2-5） | `minimax-m2.5` |
+| `*minimax*`（其他） | `minimax-m2.1` |
+| `*qwen*` | `qwen3-coder-next` |
 
 ---
 

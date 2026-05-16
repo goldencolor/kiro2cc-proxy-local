@@ -2,7 +2,7 @@
 
 A Rust-based Anthropic Claude API-compatible proxy that converts Anthropic API requests into Kiro API requests.
 
-> **✅ Supported Models: Claude Sonnet 4.5 / Claude Sonnet 4.6 / Claude Opus 4.5 / Claude Opus 4.6 / Claude Opus 4.7 / Claude Haiku 4.5**
+> **✅ Supported Models: Claude Sonnet 4.5 / Claude Sonnet 4.6 / Claude Opus 4.5 / Claude Opus 4.6 / Claude Opus 4.7 / Claude Haiku 4.5 / DeepSeek 3.2 / GLM-5 / MiniMax M2.5 / MiniMax M2.1 / Qwen3 Coder Next**
 
 [中文](README.md) | English
 
@@ -586,6 +586,12 @@ Any model name containing the following keywords is automatically mapped:
 | `*opus*` (including 4.7/4-7) | `claude-opus-4.7` |
 | `*opus*` (others) | `claude-opus-4.6` |
 | `*haiku*` | `claude-haiku-4.5` |
+| `auto` | `auto` (Kiro smart routing) |
+| `*deepseek*` | `deepseek-3.2` |
+| `*glm*` | `glm-5` |
+| `*minimax*` (including 2.5/2-5) | `minimax-m2.5` |
+| `*minimax*` (others) | `minimax-m2.1` |
+| `*qwen*` | `qwen3-coder-next` |
 
 ---
 
