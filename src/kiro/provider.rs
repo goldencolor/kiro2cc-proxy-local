@@ -535,6 +535,15 @@ impl KiroProvider {
 
             // 402 Payment Required 且额度用尽：禁用凭据并故障转移
             if status.as_u16() == 402 && Self::is_monthly_request_limit(&body) {
+                if pinned_credential_id.is_some() {
+                    anyhow::bail!(
+                        "{} API 请求失败（绑定凭据额度已用尽）: {} {}",
+                        api_type,
+                        status,
+                        body
+                    );
+                }
+
                 tracing::warn!(
                     "API 请求失败（额度已用尽，禁用凭据并切换，尝试 {}/{}）: {} {}",
                     attempt + 1,
@@ -569,6 +578,15 @@ impl KiroProvider {
 
             // 401/403 - 更可能是凭据/权限问题：计入失败并允许故障转移
             if matches!(status.as_u16(), 401 | 403) {
+                if pinned_credential_id.is_some() {
+                    anyhow::bail!(
+                        "{} API 请求失败（绑定凭据认证失败）: {} {}",
+                        api_type,
+                        status,
+                        body
+                    );
+                }
+
                 tracing::warn!(
                     "API 请求失败（可能为凭据错误，尝试 {}/{}）: {} {}",
                     attempt + 1,
