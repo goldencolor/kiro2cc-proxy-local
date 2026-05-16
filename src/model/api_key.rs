@@ -29,6 +29,10 @@ pub struct ApiKey {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub activated_at: Option<DateTime<Utc>>,
+    /// 绑定的凭据 ID（None 表示不绑定，使用全局调度）
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pinned_credential_id: Option<u64>,
 }
 
 fn default_enabled() -> bool {
@@ -43,6 +47,7 @@ impl ApiKey {
         expires_at: Option<DateTime<Utc>>,
         spending_limit: Option<f64>,
         duration_days: Option<f64>,
+        pinned_credential_id: Option<u64>,
     ) -> Self {
         Self {
             id,
@@ -54,6 +59,7 @@ impl ApiKey {
             spending_limit,
             duration_days,
             activated_at: None,
+            pinned_credential_id,
         }
     }
 
@@ -107,7 +113,7 @@ fn generate_api_key() -> String {
 /// API Key 认证结果
 pub enum ApiKeyAuthResult {
     /// 认证通过，携带 key ID 和名称
-    Valid { id: u32, name: String, spending_limit: Option<f64> },
+    Valid { id: u32, name: String, spending_limit: Option<f64>, pinned_credential_id: Option<u64> },
     /// Key 已被禁用
     Disabled,
     /// Key 已过期
@@ -167,6 +173,7 @@ impl ApiKeyManager {
                         id: api_key.id,
                         name: api_key.name.clone(),
                         spending_limit: api_key.spending_limit,
+                        pinned_credential_id: api_key.pinned_credential_id,
                     }
                 }
             }
@@ -183,6 +190,7 @@ impl ApiKeyManager {
                 id: api_key.id,
                 name: api_key.name.clone(),
                 spending_limit: api_key.spending_limit,
+                pinned_credential_id: api_key.pinned_credential_id,
             },
             None => ApiKeyAuthResult::NotFound,
         }
@@ -193,10 +201,10 @@ impl ApiKeyManager {
     }
 
     /// 创建新 key
-    pub fn create(&self, name: String, expires_at: Option<DateTime<Utc>>, spending_limit: Option<f64>, duration_days: Option<f64>) -> anyhow::Result<ApiKey> {
+    pub fn create(&self, name: String, expires_at: Option<DateTime<Utc>>, spending_limit: Option<f64>, duration_days: Option<f64>, pinned_credential_id: Option<u64>) -> anyhow::Result<ApiKey> {
         let mut keys = self.keys.write();
         let next_id = keys.iter().map(|k| k.id).max().unwrap_or(0) + 1;
-        let api_key = ApiKey::new(next_id, name, expires_at, spending_limit, duration_days);
+        let api_key = ApiKey::new(next_id, name, expires_at, spending_limit, duration_days, pinned_credential_id);
         keys.push(api_key.clone());
         drop(keys);
         self.save()?;
@@ -212,6 +220,7 @@ impl ApiKeyManager {
         expires_at: Option<Option<DateTime<Utc>>>,
         spending_limit: Option<Option<f64>>,
         duration_days: Option<Option<f64>>,
+        pinned_credential_id: Option<Option<u64>>,
     ) -> anyhow::Result<Option<ApiKey>> {
         let mut keys = self.keys.write();
         let Some(api_key) = keys.iter_mut().find(|k| k.id == id) else {
@@ -253,6 +262,9 @@ impl ApiKeyManager {
                     api_key.activated_at = None;
                 }
             }
+        }
+        if let Some(pinned) = pinned_credential_id {
+            api_key.pinned_credential_id = pinned;
         }
         let updated = api_key.clone();
         drop(keys);
