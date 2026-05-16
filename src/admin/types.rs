@@ -297,15 +297,15 @@ where
     Option::deserialize(deserializer).map(Some)
 }
 
+/// 区分 JSON 中"字段缺失"与"字段为 null"
+/// 缺失 → None（不更新），null → Some(None)（解除绑定），有值 → Some(Some(id))
 fn deserialize_optional_u64<'de, D>(
     deserializer: D,
 ) -> Result<Option<Option<u64>>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    use serde::Deserialize;
-    let opt: Option<Option<u64>> = Option::deserialize(deserializer)?;
-    Ok(opt)
+    Option::deserialize(deserializer).map(Some)
 }
 
 /// 错误响应
