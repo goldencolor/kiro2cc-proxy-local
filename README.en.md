@@ -2,7 +2,7 @@
 
 A Rust-based Anthropic Claude API-compatible proxy that converts Anthropic API requests into Kiro API requests.
 
-> **✅ Supported Models: Claude Sonnet 4.5 / Claude Opus 4.5 / Claude Opus 4.6 / Claude Haiku 4.5** (including claude-opus-4.6, claude-opus-4.7, and other latest models)
+> **✅ Supported Models: Claude Sonnet 4.5 / Claude Sonnet 4.6 / Claude Opus 4.5 / Claude Opus 4.6 / Claude Opus 4.7 / Claude Haiku 4.5**
 
 [中文](README.md) | English
 
@@ -85,8 +85,8 @@ source "$HOME/.cargo/env"
 ### Step 2: Get the Code
 
 ```bash
-git clone <repo-url>
-cd kiro2cc-proxy
+git clone https://github.com/TsinHzl/kiro2cc-proxy-local
+cd kiro2cc-proxy-local
 ```
 
 ### Step 3: Build the Project
@@ -166,8 +166,8 @@ git -v
 ### Step 2: Get the Code
 
 ```powershell
-git clone <repo-url>
-cd kiro2cc-proxy
+git clone https://github.com/TsinHzl/kiro2cc-proxy-local
+cd kiro2cc-proxy-local
 ```
 
 ### Step 3: Build the Project
@@ -228,8 +228,8 @@ Press `Ctrl+C` in the PowerShell window, or close the window.
 
 ```bash
 # 1. Clone the repo
-git clone <repo-url> /opt/kiro2cc-proxy
-cd /opt/kiro2cc-proxy
+git clone https://github.com/TsinHzl/kiro2cc-proxy-local /opt/kiro2cc-proxy-local
+cd /opt/kiro2cc-proxy-local
 
 # 2. Create data directory and config
 mkdir -p data
@@ -273,8 +273,8 @@ For running the binary directly without Docker.
 
 ```bash
 # 1. Clone the repo
-git clone <repo-url> /opt/kiro2cc-proxy-src
-cd /opt/kiro2cc-proxy-src
+git clone https://github.com/TsinHzl/kiro2cc-proxy-local /opt/kiro2cc-proxy-local
+cd /opt/kiro2cc-proxy-local
 
 # 2. Create config
 cp config.example.json app/config/config.json
@@ -426,6 +426,9 @@ Lower `priority` value = higher priority. Up to 3 retries per credential, 9 per 
 | `proxyPassword` | No | — | Proxy password |
 | `tlsBackend` | No | `rustls` | TLS backend: `rustls` or `native-tls` |
 | `loadBalancingMode` | No | `priority` | `priority` or `balanced` (round-robin) |
+| `countTokensApiUrl` | No | — | External count_tokens API URL; if set, `/v1/messages/count_tokens` is forwarded there |
+| `countTokensApiKey` | No | — | API key for the external count_tokens endpoint |
+| `countTokensAuthType` | No | `x-api-key` | Auth type for external count_tokens: `x-api-key` or `bearer` |
 
 > **TLS note**: If you encounter token refresh failures or request errors, try switching `tlsBackend` to `native-tls`.
 
@@ -577,8 +580,10 @@ Any model name containing the following keywords is automatically mapped:
 
 | Request model name (keyword) | Kiro model used |
 |------------------------------|----------------|
-| `*sonnet*` | `claude-sonnet-4.5` |
+| `*sonnet*` (including 4.6/4-6) | `claude-sonnet-4.6` |
+| `*sonnet*` (others) | `claude-sonnet-4.5` |
 | `*opus*` (including 4.5/4-5) | `claude-opus-4.5` |
+| `*opus*` (including 4.7/4-7) | `claude-opus-4.7` |
 | `*opus*` (others) | `claude-opus-4.6` |
 | `*haiku*` | `claude-haiku-4.5` |
 
@@ -670,7 +675,7 @@ git pull
 ## Project Structure
 
 ```
-kiro2cc-proxy/
+kiro2cc-proxy-local/
 ├── src/                    # Rust source code
 ├── admin-ui/               # Admin panel frontend
 ├── user-ui/                # User panel frontend

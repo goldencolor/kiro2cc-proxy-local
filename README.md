@@ -2,7 +2,7 @@
 
 一个用 Rust 编写的 Anthropic Claude API 兼容代理服务，将 Anthropic API 请求转换为 Kiro API 请求。
 
-> **✅ 支持模型：Claude Sonnet 4.5 / Claude Opus 4.5 / Claude Opus 4.6 / Claude Haiku 4.5**（含 claude-sonnet-4、claude-opus-4.6、claude-opus-4.7 等最新模型）
+> **✅ 支持模型：Claude Sonnet 4.5 / Claude Sonnet 4.6 / Claude Opus 4.5 / Claude Opus 4.6 / Claude Opus 4.7 / Claude Haiku 4.5**
 
 [English](README.en.md) | 中文
 
@@ -84,8 +84,8 @@ source "$HOME/.cargo/env"
 ### 第二步：获取项目代码
 
 ```bash
-git clone <仓库地址>
-cd kiro2cc-proxy
+git clone https://github.com/TsinHzl/kiro2cc-proxy-local
+cd kiro2cc-proxy-local
 ```
 
 ### 第三步：构建项目
@@ -165,8 +165,8 @@ git -v
 ### 第二步：获取项目代码
 
 ```powershell
-git clone <仓库地址>
-cd kiro2cc-proxy
+git clone https://github.com/TsinHzl/kiro2cc-proxy-local
+cd kiro2cc-proxy-local
 ```
 
 ### 第三步：构建项目
@@ -326,6 +326,9 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 | `proxyPassword` | 否 | — | 代理密码 |
 | `tlsBackend` | 否 | `rustls` | TLS 后端：`rustls` 或 `native-tls` |
 | `loadBalancingMode` | 否 | `priority` | `priority`（按优先级）或 `balanced`（轮询） |
+| `countTokensApiUrl` | 否 | — | 外部 count_tokens API 地址，设置后 `/v1/messages/count_tokens` 转发到该地址 |
+| `countTokensApiKey` | 否 | — | 外部 count_tokens API 密钥 |
+| `countTokensAuthType` | 否 | `x-api-key` | 外部 count_tokens 认证类型：`x-api-key` 或 `bearer` |
 
 > **TLS 说明**：如遇到 Token 刷新失败或请求报错，尝试将 `tlsBackend` 改为 `native-tls`。
 
@@ -476,8 +479,10 @@ Authorization: Bearer your-api-key
 
 | 请求模型名（含关键词） | 实际使用的 Kiro 模型 |
 |----------------------|-------------------|
-| `*sonnet*` | `claude-sonnet-4.5` |
+| `*sonnet*`（含 4.6/4-6） | `claude-sonnet-4.6` |
+| `*sonnet*`（其他） | `claude-sonnet-4.5` |
 | `*opus*`（含 4.5/4-5） | `claude-opus-4.5` |
+| `*opus*`（含 4.7/4-7） | `claude-opus-4.7` |
 | `*opus*`（其他） | `claude-opus-4.6` |
 | `*haiku*` | `claude-haiku-4.5` |
 
@@ -565,7 +570,7 @@ git pull
 ## 项目结构
 
 ```
-kiro2cc-proxy/
+kiro2cc-proxy-local/
 ├── src/                    # Rust 源码
 ├── admin-ui/               # 管理面板前端
 ├── user-ui/                # 用户面板前端
