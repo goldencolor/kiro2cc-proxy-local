@@ -497,6 +497,7 @@ pub async fn post_messages(
         .unwrap_or(false);
 
     // 提取用量追踪信息
+    let pinned_credential_id = identity.as_ref().map(|ext| ext.0.pinned_credential_id).flatten();
     let api_key_id = identity.map(|ext| ext.0.id);
     let usage_tracker = state.usage_tracker.clone();
 
@@ -518,6 +519,7 @@ pub async fn post_messages(
             usage_tracker,
             api_key_id,
             prompt_cache_usage,
+            pinned_credential_id,
         )
         .await
     } else {
@@ -530,6 +532,7 @@ pub async fn post_messages(
             usage_tracker,
             api_key_id,
             prompt_cache_usage,
+            pinned_credential_id,
         )
         .await
     }
@@ -545,9 +548,10 @@ async fn handle_stream_request(
     usage_tracker: Option<std::sync::Arc<crate::model::usage::UsageTracker>>,
     api_key_id: Option<u32>,
     prompt_cache_usage: crate::cache::PromptCacheUsage,
+    pinned_credential_id: Option<u64>,
 ) -> Response {
     // 调用 Kiro API（支持多凭据故障转移）
-    let response = match provider.call_api_stream(request_body).await {
+    let response = match provider.call_api_stream(request_body, pinned_credential_id).await {
         Ok(resp) => resp,
         Err(e) => return map_provider_error_with_context(e, model, input_tokens),
     };
@@ -685,9 +689,10 @@ async fn handle_non_stream_request(
     usage_tracker: Option<std::sync::Arc<crate::model::usage::UsageTracker>>,
     api_key_id: Option<u32>,
     prompt_cache_usage: crate::cache::PromptCacheUsage,
+    pinned_credential_id: Option<u64>,
 ) -> Response {
     // 调用 Kiro API（支持多凭据故障转移）
-    let response = match provider.call_api(request_body).await {
+    let response = match provider.call_api(request_body, pinned_credential_id).await {
         Ok(resp) => resp,
         Err(e) => return map_provider_error_with_context(e, model, input_tokens),
     };
@@ -1028,6 +1033,7 @@ pub async fn post_messages_cc(
         .unwrap_or(false);
 
     // 提取用量追踪信息
+    let pinned_credential_id = identity.as_ref().map(|ext| ext.0.pinned_credential_id).flatten();
     let api_key_id = identity.map(|ext| ext.0.id);
     let usage_tracker = state.usage_tracker.clone();
 
@@ -1049,6 +1055,7 @@ pub async fn post_messages_cc(
             usage_tracker.clone(),
             api_key_id,
             prompt_cache_usage,
+            pinned_credential_id,
         )
         .await
     } else {
@@ -1061,6 +1068,7 @@ pub async fn post_messages_cc(
             usage_tracker,
             api_key_id,
             prompt_cache_usage,
+            pinned_credential_id,
         )
         .await
     }
@@ -1079,9 +1087,10 @@ async fn handle_stream_request_buffered(
     usage_tracker: Option<std::sync::Arc<crate::model::usage::UsageTracker>>,
     api_key_id: Option<u32>,
     prompt_cache_usage: crate::cache::PromptCacheUsage,
+    pinned_credential_id: Option<u64>,
 ) -> Response {
     // 调用 Kiro API（支持多凭据故障转移）
-    let response = match provider.call_api_stream(request_body).await {
+    let response = match provider.call_api_stream(request_body, pinned_credential_id).await {
         Ok(resp) => resp,
         Err(e) => return map_provider_error_with_context(e, model, estimated_input_tokens),
     };
