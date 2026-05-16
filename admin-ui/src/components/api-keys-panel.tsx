@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Copy, Plus, Pencil, Trash2, Key, Check, Clock, BarChart3, RotateCcw, DollarSign, ArrowDownWideNarrow, Search, Loader2, Pin, Globe } from 'lucide-react'
+import { useState, useRef, useEffect } from 'react'
+import { Copy, Plus, Pencil, Trash2, Key, Check, Clock, BarChart3, RotateCcw, DollarSign, ArrowDownWideNarrow, Search, Loader2, Pin, Globe, ChevronDown, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -15,7 +15,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { useQueryClient } from '@tanstack/react-query'
-import { useApiKeys, useCreateApiKey, useUpdateApiKey, useDeleteApiKey, useServerInfo, useAllUsage, useResetKeyUsage, useRpm, useCredentials } from '@/hooks/use-credentials'
+import { useApiKeys, useCreateApiKey, useUpdateApiKey, useDeleteApiKey, useServerInfo, useAllUsage, useResetKeyUsage, useRpm, useCredentials, useCredentialBalances } from '@/hooks/use-credentials'
 import { deleteApiKey as deleteApiKeyApi } from '@/api/credentials'
 import { extractErrorMessage } from '@/lib/utils'
 import type { ApiKeyItem, UsageSummary } from '@/types/api'
@@ -42,6 +42,9 @@ export function ApiKeysPanel() {
   const [purging, setPurging] = useState(false)
   const [newPinnedCredentialId, setNewPinnedCredentialId] = useState<number | null>(null)
   const [editPinnedCredentialId, setEditPinnedCredentialId] = useState<number | null>(null)
+  const [credentialDropdownOpen, setCredentialDropdownOpen] = useState<'new' | 'edit' | null>(null)
+  const [credentialSearchQuery, setCredentialSearchQuery] = useState('')
+  const credentialDropdownRef = useRef<HTMLDivElement>(null)
 
   const quickDurationOptions = [
     { label: '1 小时', value: 1, unit: 'hours' as const },
@@ -74,6 +77,26 @@ export function ApiKeysPanel() {
   const { mutate: deleteKey } = useDeleteApiKey()
   const { mutate: resetUsage } = useResetKeyUsage()
 
+  // 收集所有被绑定的凭据 ID，批量查询余额
+  const pinnedCredentialIds = [...new Set((apiKeys ?? []).map(k => k.pinnedCredentialId).filter((id): id is number => id != null))]
+  const credentialBalanceMap = useCredentialBalances(pinnedCredentialIds)
+
+  // 关闭下拉时清空搜索
+  useEffect(() => {
+    if (!credentialDropdownOpen) setCredentialSearchQuery('')
+  }, [credentialDropdownOpen])
+
+  // 点击外部关闭下拉
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (credentialDropdownRef.current && !credentialDropdownRef.current.contains(e.target as Node)) {
+        setCredentialDropdownOpen(null)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
   // 构建 key_id -> usage 的映射
   const usageMap = new Map<number, UsageSummary>()
   usageData?.forEach((u) => usageMap.set(u.apiKeyId, u))
@@ -86,6 +109,10 @@ export function ApiKeysPanel() {
 
   const formatCost = (cost: number): string => {
     return `$${cost.toFixed(4)}`
+  }
+
+  const formatBalance = (remaining: number, limit: number, pct: number): string => {
+    return `剩余 $${remaining.toFixed(2)} / $${limit.toFixed(2)}（${(100 - pct).toFixed(1)}% 剩余）`
   }
 
   const handleResetUsage = (key: ApiKeyItem) => {
@@ -468,8 +495,23 @@ export function ApiKeysPanel() {
                             <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700 dark:bg-blue-900/60 dark:text-blue-300">
                               <Pin className="h-3 w-3" />
                               凭据 #{apiKey.pinnedCredentialId}
+                              {(() => {
+                                const cred = credentialsData?.credentials.find(c => c.id === apiKey.pinnedCredentialId)
+                                if (cred?.email) return <span className="font-normal opacity-80">· {cred.email}</span>
+                                return null
+                              })()}
                             </span>
                           )}
+                          {isPinned && (() => {
+                            const bal = credentialBalanceMap.get(apiKey.pinnedCredentialId!)
+                            if (!bal) return null
+                            return (
+                              <span className="inline-flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400">
+                                <DollarSign className="h-3 w-3" />
+                                {formatBalance(bal.remaining, bal.usageLimit, bal.usagePercentage)}
+                              </span>
+                            )
+                          })()}
                         </div>
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-xs text-muted-foreground">
                           <code>{maskKey(apiKey.key)}</code>
@@ -600,18 +642,75 @@ export function ApiKeysPanel() {
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">绑定凭据</label>
-              <select
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                value={newPinnedCredentialId ?? ''}
-                onChange={(e) => setNewPinnedCredentialId(e.target.value ? Number(e.target.value) : null)}
-              >
-                <option value="">不绑定（使用全局调度）</option>
-                {credentialsData?.credentials.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    凭据 #{c.id}{c.email ? ` (${c.email})` : ''}
-                  </option>
-                ))}
-              </select>
+              <div className="relative" ref={credentialDropdownRef}>
+                <button
+                  type="button"
+                  className="w-full flex items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm text-left"
+                  onClick={() => setCredentialDropdownOpen(credentialDropdownOpen === 'new' ? null : 'new')}
+                >
+                  <span className={newPinnedCredentialId == null ? 'text-muted-foreground' : ''}>
+                    {newPinnedCredentialId == null
+                      ? '不绑定（使用全局调度）'
+                      : (() => {
+                          const c = credentialsData?.credentials.find(x => x.id === newPinnedCredentialId)
+                          return `凭据 #${newPinnedCredentialId}${c?.email ? ` · ${c.email}` : ''}`
+                        })()}
+                  </span>
+                  <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+                </button>
+                {credentialDropdownOpen === 'new' && (
+                  <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md">
+                    <div className="p-2 border-b">
+                      <div className="relative">
+                        <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                        <input
+                          autoFocus
+                          className="w-full rounded border border-input bg-background pl-7 pr-7 py-1.5 text-sm outline-none"
+                          placeholder="搜索凭据 ID 或邮箱..."
+                          value={credentialSearchQuery}
+                          onChange={e => setCredentialSearchQuery(e.target.value)}
+                        />
+                        {credentialSearchQuery && (
+                          <button className="absolute right-2 top-1/2 -translate-y-1/2" onClick={() => setCredentialSearchQuery('')}>
+                            <X className="h-3.5 w-3.5 text-muted-foreground" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <div className="max-h-52 overflow-y-auto py-1">
+                      {([{ id: null as number | null, email: null as string | null }] as { id: number | null; email: string | null }[])
+                        .concat((credentialsData?.credentials ?? []).map(c => ({ id: c.id, email: c.email ?? null })))
+                        .filter(c => {
+                          if (!credentialSearchQuery.trim()) return true
+                          const q = credentialSearchQuery.trim().toLowerCase()
+                          if (c.id == null) return '全局'.includes(q)
+                          return String(c.id).includes(q) || (c.email ?? '').toLowerCase().includes(q)
+                        })
+                        .map(c => {
+                          const bal = c.id != null ? credentialBalanceMap.get(c.id) : undefined
+                          const isSelected = c.id === newPinnedCredentialId
+                          return (
+                            <button
+                              key={c.id ?? 'global'}
+                              type="button"
+                              className={`w-full text-left px-3 py-2 text-sm hover:bg-accent flex flex-col gap-0.5 ${isSelected ? 'bg-accent' : ''}`}
+                              onClick={() => { setNewPinnedCredentialId(c.id); setCredentialDropdownOpen(null) }}
+                            >
+                              <span className="font-medium">
+                                {c.id == null ? '不绑定（使用全局调度）' : `凭据 #${c.id}${c.email ? ` · ${c.email}` : ''}`}
+                              </span>
+                              {bal && (
+                                <span className="text-xs text-muted-foreground">
+                                  {formatBalance(bal.remaining, bal.usageLimit, bal.usagePercentage)}
+                                </span>
+                              )}
+                            </button>
+                          )
+                        })}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
             <div>
               <label className="text-sm font-medium">限制方式</label>
@@ -743,18 +842,75 @@ export function ApiKeysPanel() {
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">绑定凭据</label>
-              <select
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                value={editPinnedCredentialId ?? ''}
-                onChange={(e) => setEditPinnedCredentialId(e.target.value ? Number(e.target.value) : null)}
-              >
-                <option value="">不绑定（使用全局调度）</option>
-                {credentialsData?.credentials.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    凭据 #{c.id}{c.email ? ` (${c.email})` : ''}
-                  </option>
-                ))}
-              </select>
+              <div className="relative" ref={credentialDropdownRef}>
+                <button
+                  type="button"
+                  className="w-full flex items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm text-left"
+                  onClick={() => setCredentialDropdownOpen(credentialDropdownOpen === 'edit' ? null : 'edit')}
+                >
+                  <span className={editPinnedCredentialId == null ? 'text-muted-foreground' : ''}>
+                    {editPinnedCredentialId == null
+                      ? '不绑定（使用全局调度）'
+                      : (() => {
+                          const c = credentialsData?.credentials.find(x => x.id === editPinnedCredentialId)
+                          return `凭据 #${editPinnedCredentialId}${c?.email ? ` · ${c.email}` : ''}`
+                        })()}
+                  </span>
+                  <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+                </button>
+                {credentialDropdownOpen === 'edit' && (
+                  <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md">
+                    <div className="p-2 border-b">
+                      <div className="relative">
+                        <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                        <input
+                          autoFocus
+                          className="w-full rounded border border-input bg-background pl-7 pr-7 py-1.5 text-sm outline-none"
+                          placeholder="搜索凭据 ID 或邮箱..."
+                          value={credentialSearchQuery}
+                          onChange={e => setCredentialSearchQuery(e.target.value)}
+                        />
+                        {credentialSearchQuery && (
+                          <button className="absolute right-2 top-1/2 -translate-y-1/2" onClick={() => setCredentialSearchQuery('')}>
+                            <X className="h-3.5 w-3.5 text-muted-foreground" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <div className="max-h-52 overflow-y-auto py-1">
+                      {([{ id: null as number | null, email: null as string | null }] as { id: number | null; email: string | null }[])
+                        .concat((credentialsData?.credentials ?? []).map(c => ({ id: c.id, email: c.email ?? null })))
+                        .filter(c => {
+                          if (!credentialSearchQuery.trim()) return true
+                          const q = credentialSearchQuery.trim().toLowerCase()
+                          if (c.id == null) return '全局'.includes(q)
+                          return String(c.id).includes(q) || (c.email ?? '').toLowerCase().includes(q)
+                        })
+                        .map(c => {
+                          const bal = c.id != null ? credentialBalanceMap.get(c.id) : undefined
+                          const isSelected = c.id === editPinnedCredentialId
+                          return (
+                            <button
+                              key={c.id ?? 'global'}
+                              type="button"
+                              className={`w-full text-left px-3 py-2 text-sm hover:bg-accent flex flex-col gap-0.5 ${isSelected ? 'bg-accent' : ''}`}
+                              onClick={() => { setEditPinnedCredentialId(c.id); setCredentialDropdownOpen(null) }}
+                            >
+                              <span className="font-medium">
+                                {c.id == null ? '不绑定（使用全局调度）' : `凭据 #${c.id}${c.email ? ` · ${c.email}` : ''}`}
+                              </span>
+                              {bal && (
+                                <span className="text-xs text-muted-foreground">
+                                  {formatBalance(bal.remaining, bal.usageLimit, bal.usagePercentage)}
+                                </span>
+                              )}
+                            </button>
+                          )
+                        })}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
             <div>
               <label className="text-sm font-medium">限制方式</label>
