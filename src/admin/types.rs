@@ -143,6 +143,9 @@ pub struct UpdateCredentialRequest {
     /// 刷新令牌（可选，更新后会重新验证）
     pub refresh_token: Option<String>,
 
+    /// 用户邮箱（可选，用于前端显示）
+    pub email: Option<String>,
+
     /// 认证方式（可选）
     pub auth_method: Option<String>,
 

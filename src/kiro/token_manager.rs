@@ -1704,6 +1704,9 @@ impl MultiTokenManager {
         cred: &mut KiroCredentials,
         update: &UpdateCredentialRequest,
     ) {
+        if let Some(ref em) = update.email {
+            cred.email = if em.is_empty() { None } else { Some(em.clone()) };
+        }
         if let Some(ref am) = update.auth_method {
             cred.auth_method = Some(if am.eq_ignore_ascii_case("builder-id") || am.eq_ignore_ascii_case("iam") {
                 "idc".to_string()
