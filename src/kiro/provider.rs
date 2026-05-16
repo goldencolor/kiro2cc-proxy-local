@@ -268,8 +268,8 @@ impl KiroProvider {
     ///
     /// # Returns
     /// 返回原始的 HTTP Response，不做解析
-    pub async fn call_api(&self, request_body: &str) -> anyhow::Result<reqwest::Response> {
-        self.call_api_with_retry(request_body, false).await
+    pub async fn call_api(&self, request_body: &str, pinned_credential_id: Option<u64>) -> anyhow::Result<reqwest::Response> {
+        self.call_api_with_retry(request_body, false, pinned_credential_id).await
     }
 
     /// 发送流式 API 请求
@@ -285,8 +285,8 @@ impl KiroProvider {
     ///
     /// # Returns
     /// 返回原始的 HTTP Response，调用方负责处理流式数据
-    pub async fn call_api_stream(&self, request_body: &str) -> anyhow::Result<reqwest::Response> {
-        self.call_api_with_retry(request_body, true).await
+    pub async fn call_api_stream(&self, request_body: &str, pinned_credential_id: Option<u64>) -> anyhow::Result<reqwest::Response> {
+        self.call_api_with_retry(request_body, true, pinned_credential_id).await
     }
 
     /// 发送 MCP API 请求
@@ -453,6 +453,7 @@ impl KiroProvider {
         &self,
         request_body: &str,
         is_stream: bool,
+        pinned_credential_id: Option<u64>,
     ) -> anyhow::Result<reqwest::Response> {
         let _permit = self.concurrency_limit.acquire().await?;
         let total_credentials = self.token_manager.total_count();
@@ -465,11 +466,20 @@ impl KiroProvider {
 
         for attempt in 0..max_retries {
             // 获取调用上下文（绑定 index、credentials、token）
-            let ctx = match self.token_manager.acquire_context(model.as_deref()).await {
-                Ok(c) => c,
-                Err(e) => {
-                    last_error = Some(e);
-                    continue;
+            let ctx = if let Some(pinned_id) = pinned_credential_id {
+                match self.token_manager.acquire_context_for(pinned_id).await {
+                    Ok(c) => c,
+                    Err(e) => {
+                        return Err(e);
+                    }
+                }
+            } else {
+                match self.token_manager.acquire_context(model.as_deref()).await {
+                    Ok(c) => c,
+                    Err(e) => {
+                        last_error = Some(e);
+                        continue;
+                    }
                 }
             };
 
