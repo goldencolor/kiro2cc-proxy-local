@@ -15,7 +15,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { useQueryClient } from '@tanstack/react-query'
-import { useApiKeys, useCreateApiKey, useUpdateApiKey, useDeleteApiKey, useServerInfo, useAllUsage, useResetKeyUsage, useRpm } from '@/hooks/use-credentials'
+import { useApiKeys, useCreateApiKey, useUpdateApiKey, useDeleteApiKey, useServerInfo, useAllUsage, useResetKeyUsage, useRpm, useCredentials } from '@/hooks/use-credentials'
 import { deleteApiKey as deleteApiKeyApi } from '@/api/credentials'
 import { extractErrorMessage } from '@/lib/utils'
 import type { ApiKeyItem, UsageSummary } from '@/types/api'
@@ -40,6 +40,8 @@ export function ApiKeysPanel() {
   const [searchQuery, setSearchQuery] = useState('')
   const [purgeDialogOpen, setPurgeDialogOpen] = useState(false)
   const [purging, setPurging] = useState(false)
+  const [newPinnedCredentialId, setNewPinnedCredentialId] = useState<number | null>(null)
+  const [editPinnedCredentialId, setEditPinnedCredentialId] = useState<number | null>(null)
 
   const quickDurationOptions = [
     { label: '1 小时', value: 1, unit: 'hours' as const },
@@ -65,6 +67,7 @@ export function ApiKeysPanel() {
   const { data: serverInfo } = useServerInfo()
   const { data: usageData, dataUpdatedAt } = useAllUsage()
   const { data: rpmData } = useRpm()
+  const { data: credentialsData } = useCredentials()
   const queryClient = useQueryClient()
   const { mutate: createKey, isPending: isCreating } = useCreateApiKey()
   const { mutate: updateKey } = useUpdateApiKey()
@@ -148,6 +151,7 @@ export function ApiKeysPanel() {
             ? { durationDays: toDays(newDuration, newDurationUnit) }
             : {}
           : { spendingLimit: newSpendingLimit }),
+        ...(newPinnedCredentialId !== null ? { pinnedCredentialId: newPinnedCredentialId } : {}),
       },
       {
         onSuccess: () => {
@@ -158,6 +162,7 @@ export function ApiKeysPanel() {
           setNewDuration(1)
           setNewDurationUnit('days')
           setNewSpendingLimit(100)
+          setNewPinnedCredentialId(null)
         },
         onError: (err) => toast.error(`创建失败: ${extractErrorMessage(err)}`),
       }
@@ -186,7 +191,7 @@ export function ApiKeysPanel() {
       data.durationDays = null // 清除懒激活
     }
     updateKey(
-      { id: editingKey.id, data },
+      { id: editingKey.id, data: { ...data, pinnedCredentialId: editPinnedCredentialId } },
       {
         onSuccess: () => {
           toast.success('已更新')
@@ -218,6 +223,7 @@ export function ApiKeysPanel() {
   const openEdit = (key: ApiKeyItem) => {
     setEditingKey(key)
     setEditName(key.name)
+    setEditPinnedCredentialId(key.pinnedCredentialId ?? null)
     // 根据 key 类型设置编辑模式
     if (key.spendingLimit != null) {
       setEditMode('quota')
@@ -449,6 +455,11 @@ export function ApiKeysPanel() {
                           <Badge variant={status === 'active' ? 'success' : status === 'pending' ? 'secondary' : status === 'expired' ? 'warning' : 'destructive'}>
                             {status === 'active' ? '启用' : status === 'pending' ? '待激活' : status === 'expired' ? '已过期' : '已禁用'}
                           </Badge>
+                          {apiKey.pinnedCredentialId != null && (
+                            <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+                              📌 凭据 #{apiKey.pinnedCredentialId}
+                            </span>
+                          )}
                         </div>
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-xs text-muted-foreground">
                           <code>{maskKey(apiKey.key)}</code>
@@ -546,6 +557,21 @@ export function ApiKeysPanel() {
               {nameConflict && (
                 <p className="text-xs text-destructive mt-1">该编号已存在，请更换</p>
               )}
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">绑定凭据</label>
+              <select
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={newPinnedCredentialId ?? ''}
+                onChange={(e) => setNewPinnedCredentialId(e.target.value ? Number(e.target.value) : null)}
+              >
+                <option value="">不绑定（使用全局调度）</option>
+                {credentialsData?.credentials.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    凭据 #{c.id}{c.email ? ` (${c.email})` : ''}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="text-sm font-medium">限制方式</label>
@@ -674,6 +700,21 @@ export function ApiKeysPanel() {
                 value={editName}
                 onChange={(e) => setEditName(e.target.value)}
               />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">绑定凭据</label>
+              <select
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={editPinnedCredentialId ?? ''}
+                onChange={(e) => setEditPinnedCredentialId(e.target.value ? Number(e.target.value) : null)}
+              >
+                <option value="">不绑定（使用全局调度）</option>
+                {credentialsData?.credentials.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    凭据 #{c.id}{c.email ? ` (${c.email})` : ''}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="text-sm font-medium">限制方式</label>
