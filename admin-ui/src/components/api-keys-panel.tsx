@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Copy, Plus, Pencil, Trash2, Key, Check, Clock, BarChart3, RotateCcw, DollarSign, ArrowDownWideNarrow, Search, Loader2 } from 'lucide-react'
+import { Copy, Plus, Pencil, Trash2, Key, Check, Clock, BarChart3, RotateCcw, DollarSign, ArrowDownWideNarrow, Search, Loader2, Pin, Globe } from 'lucide-react'
 import { toast } from 'sonner'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -431,33 +431,43 @@ export function ApiKeysPanel() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-3">
-          {[...filteredKeys].sort((a, b) => {
-            if (sortBy === 'cost-desc') {
-              return (usageMap.get(b.id)?.totalCost ?? 0) - (usageMap.get(a.id)?.totalCost ?? 0)
-            }
-            if (sortBy === 'cost-asc') {
-              return (usageMap.get(a.id)?.totalCost ?? 0) - (usageMap.get(b.id)?.totalCost ?? 0)
-            }
+        (() => {
+          const sorted = [...filteredKeys].sort((a, b) => {
+            if (sortBy === 'cost-desc') return (usageMap.get(b.id)?.totalCost ?? 0) - (usageMap.get(a.id)?.totalCost ?? 0)
+            if (sortBy === 'cost-asc') return (usageMap.get(a.id)?.totalCost ?? 0) - (usageMap.get(b.id)?.totalCost ?? 0)
             return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-          }).map((apiKey) => {
+          })
+          const pinnedKeys = sorted.filter(k => k.pinnedCredentialId != null)
+          const globalKeys = sorted.filter(k => k.pinnedCredentialId == null)
+
+          const renderCard = (apiKey: ApiKeyItem) => {
             const status = getKeyStatus(apiKey)
             const usage = usageMap.get(apiKey.id)
+            const isPinned = apiKey.pinnedCredentialId != null
             return (
-              <Card key={apiKey.id} className={status === 'disabled' || status === 'expired' ? 'opacity-60' : ''}>
+              <Card
+                key={apiKey.id}
+                className={[
+                  status === 'disabled' || status === 'expired' ? 'opacity-60' : '',
+                  isPinned
+                    ? 'border-l-4 border-l-blue-500 bg-blue-50/30 dark:bg-blue-950/20'
+                    : 'border-l-4 border-l-emerald-400',
+                ].filter(Boolean).join(' ')}
+              >
                 <CardContent className="py-3 px-3 sm:px-4">
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                     <div className="flex items-center gap-3 min-w-0 flex-1">
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <code className="text-xs text-muted-foreground font-mono">{formatSerial(apiKey.id)}</code>
                           <span className="font-medium truncate">{apiKey.name}</span>
                           <Badge variant={status === 'active' ? 'success' : status === 'pending' ? 'secondary' : status === 'expired' ? 'warning' : 'destructive'}>
                             {status === 'active' ? '启用' : status === 'pending' ? '待激活' : status === 'expired' ? '已过期' : '已禁用'}
                           </Badge>
-                          {apiKey.pinnedCredentialId != null && (
-                            <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800 dark:bg-blue-900 dark:text-blue-200">
-                              📌 凭据 #{apiKey.pinnedCredentialId}
+                          {isPinned && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700 dark:bg-blue-900/60 dark:text-blue-300">
+                              <Pin className="h-3 w-3" />
+                              凭据 #{apiKey.pinnedCredentialId}
                             </span>
                           )}
                         </div>
@@ -486,7 +496,6 @@ export function ApiKeysPanel() {
                             </span>
                           ) : null}
                         </div>
-                        {/* 用量信息（始终显示） */}
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 text-xs">
                           <span className="flex items-center gap-1 text-muted-foreground">
                             <BarChart3 className="h-3 w-3" />
@@ -536,8 +545,39 @@ export function ApiKeysPanel() {
                 </CardContent>
               </Card>
             )
-          })}
-        </div>
+          }
+
+          return (
+            <div className="space-y-6">
+              {pinnedKeys.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 px-1">
+                    <Pin className="h-4 w-4 text-blue-500" />
+                    <span className="text-sm font-semibold text-blue-700 dark:text-blue-400">绑定凭据</span>
+                    <Badge variant="secondary" className="text-xs px-1.5">{pinnedKeys.length}</Badge>
+                    <span className="text-xs text-muted-foreground">— 请求固定使用指定凭据</span>
+                  </div>
+                  <div className="grid gap-3">
+                    {pinnedKeys.map(renderCard)}
+                  </div>
+                </div>
+              )}
+              {globalKeys.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 px-1">
+                    <Globe className="h-4 w-4 text-emerald-500" />
+                    <span className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">全局调度</span>
+                    <Badge variant="secondary" className="text-xs px-1.5">{globalKeys.length}</Badge>
+                    <span className="text-xs text-muted-foreground">— 请求参与全局凭据轮询</span>
+                  </div>
+                  <div className="grid gap-3">
+                    {globalKeys.map(renderCard)}
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        })()
       )}
       {/* 创建对话框 */}
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
