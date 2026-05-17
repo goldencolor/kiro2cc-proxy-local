@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Copy, Plus, Pencil, Trash2, Key, Check, Clock, BarChart3, RotateCcw, DollarSign, ArrowDownWideNarrow, Search, Loader2, Pin, Globe, ChevronDown, X } from 'lucide-react'
+import { Copy, Plus, Pencil, Trash2, Key, Check, Clock, BarChart3, RotateCcw, DollarSign, ArrowDownWideNarrow, Search, Loader2, Pin, Globe, ChevronDown, X, FileText } from 'lucide-react'
 import { toast } from 'sonner'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -19,6 +19,7 @@ import { useApiKeys, useCreateApiKey, useUpdateApiKey, useDeleteApiKey, useServe
 import { deleteApiKey as deleteApiKeyApi } from '@/api/credentials'
 import { extractErrorMessage } from '@/lib/utils'
 import type { ApiKeyItem, UsageSummary } from '@/types/api'
+import { UsageLogPage } from '@/components/usage-log-page'
 
 export function ApiKeysPanel() {
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
@@ -45,6 +46,8 @@ export function ApiKeysPanel() {
   const [credentialDropdownOpen, setCredentialDropdownOpen] = useState<'new' | 'edit' | null>(null)
   const [credentialSearchQuery, setCredentialSearchQuery] = useState('')
   const credentialDropdownRef = useRef<HTMLDivElement>(null)
+  const [view, setView] = useState<'list' | 'detail'>('list')
+  const [detailKeyId, setDetailKeyId] = useState<number | null>(null)
 
   const quickDurationOptions = [
     { label: '1 小时', value: 1, unit: 'hours' as const },
@@ -96,6 +99,14 @@ export function ApiKeysPanel() {
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [])
+
+  // 当 key 被删除时自动退出详情页
+  useEffect(() => {
+    if (view === 'detail' && detailKeyId !== null && apiKeys && !apiKeys.find(k => k.id === detailKeyId)) {
+      setView('list')
+      setDetailKeyId(null)
+    }
+  }, [apiKeys, view, detailKeyId])
 
   // 构建 key_id -> usage 的映射
   const usageMap = new Map<number, UsageSummary>()
@@ -316,6 +327,19 @@ export function ApiKeysPanel() {
     const serialStr = String(key.id).padStart(3, '0')
     return serialStr.includes(q) || String(key.id).includes(q) || key.name.toLowerCase().includes(q)
   })
+  if (view === 'detail' && detailKeyId !== null) {
+    const apiKey = apiKeys?.find(k => k.id === detailKeyId)
+    if (!apiKey) return null  // will be dismissed by useEffect
+    return (
+      <UsageLogPage
+        mode="apikey"
+        apiKey={apiKey}
+        summary={usageMap.get(apiKey.id)}
+        onBack={() => { setView('list'); setDetailKeyId(null) }}
+      />
+    )
+  }
+
   return (
     <div className="space-y-4">
       {/* 服务信息 */}
@@ -576,6 +600,14 @@ export function ApiKeysPanel() {
                         {copiedId === apiKey.id ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
                       </Button>
                       <Switch checked={apiKey.enabled} onCheckedChange={() => handleToggleEnabled(apiKey)} />
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => { setDetailKeyId(apiKey.id); setView('detail') }}
+                        title="查看使用日志"
+                      >
+                        <FileText className="h-4 w-4" />
+                      </Button>
                       <Button variant="ghost" size="sm" onClick={() => openEdit(apiKey)} title="编辑">
                         <Pencil className="h-4 w-4" />
                       </Button>
