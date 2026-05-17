@@ -12,6 +12,7 @@
 - 读完"架构全景"后，你将能理解：为什么需要协议转换层，以及请求从进来到出去经历了哪几个组件
 - 读完"核心源码剥洋葱"后，你将能看懂：Token 双重检查锁定、AWS Event Stream 二进制解码、Kiro→Anthropic SSE 转换
 - 读完"难点突破"后，你将彻底搞清楚：指数退避抖动算法、thinking 标签的"假结束"检测、凭据自愈机制
+- 读完"两种负载均衡模式详解"后，你将完整理解：priority 粘性调度与 balanced Round-Robin 的选凭据逻辑、失败处理差异、429 的特殊处理悖论
 
 ---
 
@@ -25,6 +26,7 @@
 - [错误处理与安全边界](#错误处理与安全边界)
 - [关键类型与接口定义](#关键类型与接口定义)
 - [难点突破（逐个攻克）](#难点突破逐个攻克)
+- [两种负载均衡模式详解](#两种负载均衡模式详解)
 - [为什么要这样设计？](#为什么要这样设计)
 - [避坑指南](#避坑指南)
 
@@ -111,7 +113,10 @@ kiro2cc-proxy-local/
 **🔧 第二层 — 技术原理**
 - **设计模式**：状态机 + 双重检查锁定（Double-Checked Locking）
 - **为什么不直接锁**：刷新 Token 是网络 I/O（可能耗时数秒），如果每次都持锁，并发请求全部排队——CPU 空转、延迟爆炸。DCL 让 99% 的请求零等待直接拿缓存 Token
-- **数据流链路**：`acquire_context(model)` → 选择凭据 → 检查 Token 有效性 → (可选)加 refresh_lock 刷新 → 返回 `CallContext`
+- **两种调度策略**：
+  - `priority` 模式（默认）：粘性使用 `current_id` 指向的最高优先级凭据，失败才切换
+  - `balanced` 模式：每次请求都通过 `AtomicU64` 计数器做 Round-Robin，均匀轮转所有可用凭据
+- **数据流链路**：`acquire_context(model)` → 按模式选择凭据 → 检查 Token 有效性 → (可选)加 refresh_lock 刷新 → 返回 `CallContext`
 
 **🔬 第三层 — 实现细节**
 - **文件位置**：`src/kiro/token_manager.rs:906`
@@ -571,12 +576,138 @@ machine_id::generate_from_credentials(credentials, config)
 
 ### 难点 4：balanced 模式下 429 的处理悖论
 
-**🤔 难在哪里**：429（被限流）意味着当前凭据被上游限速，应该换一个凭据。但这个凭据本身没有"失败"（401 那种），不能 `report_failure` 增加失败计数（那样会导致凭据被禁）。正确做法是 `report_success` 来增加成功计数——在 balanced 模式的 Round-Robin 逻辑里，成功次数高的凭据会被 `rr_counter` 自然跳过，触发轮转。
+**🤔 难在哪里**：429（被限流）意味着当前凭据被上游限速，应该换一个凭据。但这个凭据本身没有"失败"（401 那种），不能 `report_failure` 增加失败计数（那样会导致凭据被禁）。
+
+- **priority 模式**：429 不调用任何 report，直接重试——下次请求仍用同一凭据，因为 `current_id` 没变。这是合理的：限流是暂时的，重试间隔（指数退避）过后可能就解除了。
+- **balanced 模式**：调用 `report_success(ctx.id)`——让 `rr_counter` 自然推进，下次请求轮到下一个凭据，绕开被限流的那个。
 
 **💡 心智模型**：
-餐厅里某个服务员因为太忙被顾客抱怨（被限流），但他没有犯错误（不该被记"投诉"）。让他休息一下（不再派单给他）的方法是把他的"已服务桌数"增加，让排班系统自动给其他人派下一单。
+餐厅里某个服务员因为太忙被顾客抱怨（被限流），但他没有犯错误（不该被记"投诉"）。priority 模式：稍等片刻再找他（退避重试）。balanced 模式：把他的"已服务桌数"加一，让排班系统自动派下一单给别人。
 
-**✅ 正确姿势**：`src/kiro/provider.rs:380` — 429 时调用 `report_success(ctx.id)` 而非 `report_failure`。
+**✅ 正确姿势**：`src/kiro/provider.rs:380` — 429 时 balanced 模式调用 `report_success(ctx.id)`，priority 模式直接进入退避重试。
+
+---
+
+## ⚖️ 两种负载均衡模式详解
+
+> **配置入口**：`config.json` 的 `loadBalancingMode` 字段，默认 `"priority"`，可通过 Admin API `PUT /api/admin/config/load-balancing` 运行时热切换，立即生效并持久化到文件。
+
+---
+
+### 模式一：priority（优先级模式，默认）
+
+**核心思想**：粘性使用优先级最高的凭据，只有它失效才切换。
+
+**选凭据流程**（`token_manager.rs:813-827`）：
+
+```
+acquire_context()
+  ↓
+读取 current_id（当前活跃凭据指针）
+  ↓
+该凭据未禁用？
+  ├─ 是 → 直接使用，不重新选择
+  └─ 否 → select_next_credential()
+              ↓
+           available.iter().min_by_key(|e| e.credentials.priority)
+              ↓
+           priority 数值最小的未禁用凭据
+              ↓
+           更新 current_id
+```
+
+**关键特性**：
+- `priority` 字段数值越小，优先级越高（0 > 1 > 2 ...）
+- 同一时刻所有请求都打向同一个凭据（`current_id`），无分散
+- 凭据切换只发生在：当前凭据被禁用、Token 刷新失败
+- 切换后 `current_id` 永久指向新凭据，直到它也失效
+
+**适用场景**：凭据有明确质量差异（主账号/备用账号），希望优先消耗主账号额度。
+
+---
+
+### 模式二：balanced（均衡模式）
+
+**核心思想**：每次请求都重新选凭据，通过 Round-Robin 均匀分摊流量。
+
+**选凭据流程**（`token_manager.rs:814-819` + `775-781`）：
+
+```
+acquire_context()
+  ↓
+is_balanced = true → 强制跳过 current_id（不复用）
+  ↓
+select_next_credential()
+  ↓
+过滤可用池：!disabled + opus模型检查
+  ↓
+rr_counter.fetch_add(1, Ordering::Relaxed)  ← 原子递增，无锁
+  ↓
+available[rr_counter % available.len()]     ← 取模映射到当前可用集合
+  ↓
+返回选中凭据（同时更新 current_id，但下次请求不会用它）
+```
+
+**关键特性**：
+- `rr_counter` 是 `AtomicU64`，全局单调递增，并发安全
+- 轮转的是**动态可用集合**，不是固定下标——某凭据被禁后，剩余凭据自动填补空位
+- `priority` 字段在此模式下**完全不影响选择**
+- 每次请求独立选凭据，同一时刻不同并发请求可能使用不同凭据
+
+**适用场景**：多个同质量凭据，希望均匀消耗各账号额度，避免单账号触发限流。
+
+---
+
+### 两种模式对比
+
+| 维度 | priority 模式 | balanced 模式 |
+|------|--------------|--------------|
+| 选凭据依据 | `priority` 数值最小 | `rr_counter % available.len()` |
+| current_id 作用 | 粘性复用，是主要选择依据 | 每次覆盖写入，但下次不读 |
+| priority 字段影响 | 决定选哪个 | 无影响 |
+| 并发请求分布 | 全部打向同一凭据 | 均匀分散到各凭据 |
+| 切换时机 | 当前凭据失效时 | 每次请求都切换 |
+| 适合场景 | 主备账号分级 | 同质量账号均摊 |
+
+---
+
+### 共用的失败处理规则（两种模式一致）
+
+**API 调用失败（401/403）** — `report_failure`（`token_manager.rs:1225`）：
+- `failure_count++`，达到 `MAX_FAILURES_PER_CREDENTIAL = 3` 次 → `disabled = true`，原因 `TooManyFailures`
+- 禁用后**始终按 priority 切换** `current_id`（即使当前是 balanced 模式）
+
+**额度耗尽（402 MONTHLY_REQUEST_COUNT）** — `report_quota_exhausted`（`token_manager.rs:1280`）：
+- 立即禁用，原因 `QuotaExceeded`，不等待 3 次失败
+- `QuotaExceeded` 的凭据**不参与自愈**，必须手动重新启用
+
+**429 限流** — 两种模式处理不同：
+- priority 模式：不调用 report_failure，直接重试（凭据状态不变，下次仍用同一凭据）
+- balanced 模式：调用 `report_success`（`provider.rs:380`），让 `rr_counter` 自然推进到下一个凭据
+
+**Token 刷新失败** — 调用 `switch_to_next_by_priority`，**不计入失败次数**，`tried_count++` 后重试循环
+
+---
+
+### 自愈机制（两种模式共用）
+
+`token_manager.rs:836-854`：当可用池为空时触发：
+
+```
+select_next_credential() 返回 None
+  ↓
+检查：是否所有禁用原因都是 TooManyFailures？
+  ├─ 是 → 重置所有此类凭据：disabled=false, failure_count=0
+  │        重新 select_next_credential()
+  │        （等价于无需重启的自动恢复）
+  └─ 否（含 QuotaExceeded 或 Manual）→ bail! 所有凭据均不可用
+```
+
+---
+
+### 绑定凭据路径（bypass 两种模式）
+
+`acquire_context_for(credential_id)`（`token_manager.rs:888`）：API Key 绑定特定凭据时使用，完全绕过 priority/balanced 调度，直接按 ID 取凭据，禁用则报错不重试。
 
 ---
 
