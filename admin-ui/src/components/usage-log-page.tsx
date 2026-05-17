@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { ArrowLeft, FileText, ChevronLeft, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -73,23 +73,26 @@ function Pagination({ page, totalPages, onChange }: { page: number; totalPages: 
 
 export function UsageLogPage(props: UsageLogPageProps) {
   const [page, setPage] = useState(1)
-  const isCredential = props.mode === 'credential'
 
-  const credResult = useCredentialUsageRecords(
-    isCredential ? (props as CredentialUsagePageProps).credential.id : 0,
-    page
-  )
-  const keyResult = useApiKeyUsageRecords(
-    !isCredential ? (props as ApiKeyUsagePageProps).apiKey.id : 0,
-    page
-  )
+  let credentialId = 0
+  let apiKeyId = 0
+  let title: string
 
-  const result = isCredential ? credResult : keyResult
+  if (props.mode === 'credential') {
+    credentialId = props.credential.id
+    title = `凭据 #${props.credential.id}${props.credential.email ? ` · ${props.credential.email}` : ''}`
+  } else {
+    apiKeyId = props.apiKey.id
+    title = `Key #${String(props.apiKey.id).padStart(3, '0')} · ${props.apiKey.name}`
+  }
+
+  const credResult = useCredentialUsageRecords(credentialId, page)
+  const keyResult = useApiKeyUsageRecords(apiKeyId, page)
+  const result = props.mode === 'credential' ? credResult : keyResult
   const { data, isLoading, isError, refetch } = result
 
-  const title = isCredential
-    ? `凭据 #${(props as CredentialUsagePageProps).credential.id}${(props as CredentialUsagePageProps).credential.email ? ` · ${(props as CredentialUsagePageProps).credential.email}` : ''}`
-    : `Key #${String((props as ApiKeyUsagePageProps).apiKey.id).padStart(3, '0')} · ${(props as ApiKeyUsagePageProps).apiKey.name}`
+  const targetId = props.mode === 'credential' ? credentialId : apiKeyId
+  useEffect(() => { setPage(1) }, [targetId])
 
   const summary = props.summary
 
@@ -188,8 +191,8 @@ export function UsageLogPage(props: UsageLogPageProps) {
                       </tr>
                     </thead>
                     <tbody>
-                      {data.records.map((r, i) => (
-                        <tr key={i} className="border-b last:border-0 hover:bg-muted/30">
+                      {data.records.map((r) => (
+                        <tr key={`${r.createdAt}-${r.model}-${r.apiKeyId}`} className="border-b last:border-0 hover:bg-muted/30">
                           <td className="px-4 py-2 text-xs text-muted-foreground whitespace-nowrap">{formatDate(r.createdAt)}</td>
                           <td className="px-4 py-2">
                             <Badge className={`text-xs px-1.5 py-0 ${getModelColor(r.model)}`}>
