@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 pub struct UsageRecord {
     /// API Key ID（0 = 主密钥）
     pub api_key_id: u32,
-    /// Credential ID
+    /// 实际使用的凭据 ID
     #[serde(default)]
     pub credential_id: Option<u64>,
     /// 模型名称
@@ -231,6 +231,9 @@ impl UsageTracker {
         page: usize,
         page_size: usize,
     ) -> (Vec<UsageRecord>, usize) {
+        if page_size == 0 {
+            return (Vec::new(), 0);
+        }
         let records = self.records.read();
         let mut filtered: Vec<&UsageRecord> = records
             .iter()
@@ -250,6 +253,9 @@ impl UsageTracker {
         page: usize,
         page_size: usize,
     ) -> (Vec<UsageRecord>, usize) {
+        if page_size == 0 {
+            return (Vec::new(), 0);
+        }
         let records = self.records.read();
         let mut filtered: Vec<&UsageRecord> = records
             .iter()
