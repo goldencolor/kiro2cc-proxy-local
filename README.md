@@ -2,7 +2,7 @@
 
 一个用 Rust 编写的 Anthropic Claude API 兼容代理服务，将 Anthropic API 请求转换为 Kiro API 请求。
 
-> **✅ 支持模型：Claude Sonnet 4.5 / Claude Sonnet 4.6 / Claude Opus 4.5 / Claude Opus 4.6 / Claude Opus 4.7 / Claude Haiku 4.5 / DeepSeek 3.2 / GLM-5 / MiniMax M2.5 / MiniMax M2.1 / Qwen3 Coder Next**
+> **✅ 支持模型：Claude Sonnet 4.5 / Claude Sonnet 4.6 / Claude Opus 4.5 / Claude Opus 4.6 / Claude Opus 4.7 / Claude Haiku 4.5 / DeepSeek 3.2 / GLM-5 / MiniMax M2.1 / MiniMax M2.5 / Qwen3-Coder**
 
 [English](README.en.md) | 中文
 
@@ -23,14 +23,12 @@
 - **WebSearch**：内置 WebSearch 工具转换逻辑
 - **Admin 管理**：可选的 Web 管理界面，支持凭据管理、余额查询等
 - **凭据级代理**：支持为每个凭据单独配置 HTTP/SOCKS5 代理
-- **API Key 凭据绑定**：创建 API Key 时可绑定指定凭据，该 Key 的所有请求只使用绑定凭据的 Token，不参与全局调度
 
 ---
 
 ## 目录
 
 - [快速开始（新手必读）](#快速开始新手必读)
-- [快捷命令安装](#快捷命令安装)
 - [本地部署（macOS）](#本地部署macos)
 - [本地部署（Windows）](#本地部署windows)
 - [获取 Kiro 凭据](#获取-kiro-凭据)
@@ -48,7 +46,9 @@
 
 **这个项目是什么？**
 
-kiro2cc-proxy 是一个本地代理服务。它把标准的 Anthropic Claude API 请求转发给 Kiro（AWS 的 AI 编程工具），让你可以用 Kiro 账号免费使用 Claude 模型。
+kiro2cc-proxy 是一个代理服务。它把标准的 Anthropic Claude API 请求转发给 Kiro（AWS 的 AI 编程工具），让你可以用 Claude Code 使用 Kiro 账号的模型。
+
+> 一句话说明白，就是：它能把登录的 Kiro 账号上的模型代理到 Claude Code 上进行使用。否则的话就只能在 Kiro IDE 或者 Kiro CLI 上使用。
 
 **使用前提：**
 
@@ -63,52 +63,6 @@ kiro2cc-proxy 是一个本地代理服务。它把标准的 Anthropic Claude API
 ```
 
 ---
-
-## 快捷命令安装
-
-安装后可在任意终端直接使用 `build_kiro2cc_proxy`（构建）和 `run_kiro2cc_proxy`（启动），无需切换到项目目录。
-
-### macOS
-
-```bash
-chmod +x setup-aliases.sh
-./setup-aliases.sh
-```
-
-安装完成后执行 `source ~/.zshrc`（或 `source ~/.bashrc`）使其立即生效。
-
-| 命令 | 说明 |
-|------|------|
-| `build_kiro2cc_proxy` | 构建项目（等同于 `./build-mac.sh`） |
-| `run_kiro2cc_proxy` | 启动服务（等同于 `./run-local-service-mac.sh`） |
-
-> 脚本会自动检测 `~/.zshrc`、`~/.bashrc`、`~/.bash_profile` 并写入，已存在的条目自动跳过，重复运行不会重复写入。
-
-### Windows
-
-以管理员身份打开 PowerShell，先允许执行脚本（仅需一次）：
-
-```powershell
-Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
-```
-
-然后运行：
-
-```powershell
-.\setup-aliases.ps1
-```
-
-安装完成后执行 `. $PROFILE` 使其立即生效。
-
-| 命令 | 说明 |
-|------|------|
-| `build_kiro2cc_proxy` | 构建项目（等同于 `.\build-windows.ps1`） |
-| `run_kiro2cc_proxy` | 启动服务（等同于 `.\run-local-service-windows.ps1`） |
-
-> 脚本会自动创建 PowerShell Profile（若不存在），已存在的条目自动跳过，重复运行不会重复写入。
-
----
-
 ## 本地部署（macOS）
 
 ### 第一步：安装依赖
@@ -131,9 +85,27 @@ source "$HOME/.cargo/env"
 ### 第二步：获取项目代码
 
 ```bash
-git clone https://github.com/TsinHzl/kiro2cc-proxy-local
+git clone https://github.com/TsinHzl/kiro2cc-proxy-local.git
 cd kiro2cc-proxy-local
 ```
+
+### （可选）安装 Shell 快捷命令
+
+运行项目自带的一键安装脚本，以后可在任意终端直接使用 `build_kiro2cc_proxy` 和 `run_kiro2cc_proxy` 命令，无需切换到项目目录：
+
+```bash
+bash setup_shell_aliases.sh
+source ~/.zshrc   # zsh 用户；bash 用户执行 source ~/.bashrc
+```
+
+安装后即可使用：
+
+```bash
+build_kiro2cc_proxy   # 等同于 ./build-mac.sh
+run_kiro2cc_proxy     # 等同于 ./run-local-service-mac.sh
+```
+
+> 脚本仅适用于 macOS，自动修改 `~/.zshrc` 和 `~/.bashrc`（如存在），可重复运行（幂等）。
 
 ### 第三步：构建项目
 
@@ -166,16 +138,24 @@ cd kiro2cc-proxy-local
 **首次启动**会进入配置向导：
 
 ```
-  API Key（访问此代理的密钥，自定义即可）: sk-my-proxy-key
-  Admin API Key（管理后台密码，直接回车跳过）: my-admin-pass
-  端口 [默认: 5678]:
-  Region [默认: us-east-1]:
-  本地 HTTP 代理端口（直接回车跳过，例如: 7890 / 10089）: 7890
+API Key（访问此代理密钥，自定义即可，可选）: [默认sk-my-proxy-key]
+Admin API Key（管理后台密码(http://ip:端口/admin页面)，必填）: [默认my-admin-pass]
+端口 [默认: 5678]:
+Region [默认: us-east-1]:
+本地 HTTP 代理端口（例如: 7890 / 10089）: [填入你的代理端口]
 ```
 
-- **API Key**：自己随便设一个，客户端连接时用这个 Key 认证
-- **Admin API Key**：管理面板的登录密码，建议设置
-- > ⚠️ **【重要】代理端口（国内用户必须配置）**：不配置代理将无法访问任何 Claude 模型，请填写本地代理软件（Clash/V2Ray/Shadowsocks 等）的 HTTP 监听端口，例如 `7890` 或 `10089`。不知道端口号请查看代理软件的设置页面。
+- **⚠️【重要】本地 HTTP 代理端口**：也就是开魔法的端口。注意：**本地搭建的话，不配置将无法访问 Claude 模型，如 Claude 4.6 和 Claude 4.7 模型**
+
+- > ⚠️ **【重要】代理端口（国内用户必须配置）**
+  >
+  > 常在终端上使用的命令如：export http_proxy=http://127.0.0.1:10089; export https_proxy=http://127.0.0.1:10089;
+  >
+  > 这里的 10089 就是你开魔法的端口
+  >
+  > 不知道端口号请查看代理软件的设置页面
+
+- **Admin API Key**：**管理面板的登录密码(http://ip:端口/admin页面)，建议设置**
 
 配置完成后自动生成 `app/config/config.json`，服务启动，浏览器自动打开管理面板。
 
@@ -192,7 +172,6 @@ cd kiro2cc-proxy-local
 在运行服务的终端窗口按 `Ctrl+C`，或直接关闭终端窗口。
 
 ---
-
 ## 本地部署（Windows）
 
 ### 第一步：安装依赖
@@ -212,9 +191,27 @@ git -v
 ### 第二步：获取项目代码
 
 ```powershell
-git clone https://github.com/TsinHzl/kiro2cc-proxy-local
+git clone https://github.com/TsinHzl/kiro2cc-proxy-local.git
 cd kiro2cc-proxy-local
 ```
+
+### （可选）安装 PowerShell 快捷命令
+
+运行项目自带的安装脚本，以后可在任意 PowerShell 直接使用 `build_kiro2cc_proxy` 和 `run_kiro2cc_proxy` 命令，无需切换到项目目录：
+
+```powershell
+.\setup_shell_aliases.ps1
+. $PROFILE
+```
+
+安装后即可使用：
+
+```powershell
+build_kiro2cc_proxy   # 等同于 .\build-windows.ps1
+run_kiro2cc_proxy     # 等同于 .\run-local-service-windows.ps1
+```
+
+> 脚本同时更新 Windows PowerShell 5.x 和 PowerShell 7+ 的 profile，可重复运行（幂等）。
 
 ### 第三步：构建项目
 
@@ -243,14 +240,24 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 **首次启动**会进入配置向导：
 
 ```
-  API Key（访问此代理的密钥，自定义即可）: sk-my-proxy-key
-  Admin API Key（管理后台密码，直接回车跳过）: my-admin-pass
-  端口 [默认: 5678]:
-  Region [默认: us-east-1]:
-  本地 HTTP 代理端口（直接回车跳过，例如: 7890 / 10089）: 7890
+API Key（访问此代理密钥，自定义即可，可选）: [默认sk-my-proxy-key]
+Admin API Key（管理后台密码(http://ip:端口/admin页面)，必填）: [默认my-admin-pass]
+端口 [默认: 5678]:
+Region [默认: us-east-1]:
+本地 HTTP 代理端口（例如: 7890 / 10089）: [填入你的代理端口]
 ```
 
-- > ⚠️ **【重要】代理端口（国内用户必须配置）**：不配置代理将无法访问任何 Claude 模型，请填写本地代理软件（Clash/V2Ray/Shadowsocks 等）的 HTTP 监听端口，例如 `7890` 或 `10089`。
+- **⚠️【重要】本地 HTTP 代理端口**：也就是开魔法的端口。注意：**本地搭建的话，不配置将无法访问 Claude 模型，如 Claude 4.6 和 Claude 4.7 模型**
+
+- > ⚠️ **【重要】代理端口（国内用户必须配置）**
+  >
+  > 常在终端上使用的命令如：export http_proxy=http://127.0.0.1:10089; export https_proxy=http://127.0.0.1:10089;
+  >
+  > 这里的 10089 就是你开魔法的端口
+  >
+  > 不知道端口号请查看代理软件的设置页面
+
+- **Admin API Key**：**管理面板的登录密码(http://ip:端口/admin页面)，建议设置**
 
 配置完成后自动生成 `app\config\config.json`，服务启动，浏览器自动打开管理面板。
 
@@ -265,7 +272,6 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 在运行服务的 PowerShell 窗口按 `Ctrl+C`，或直接关闭窗口。
 
 ---
-
 ## 获取 Kiro 凭据
 
 ### 完整流程：从 Kiro Account Manager 导出到管理面板导入
@@ -284,7 +290,7 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 **第三步：通过管理面板导入凭据（推荐）**
 
 1. 打开管理面板：`http://127.0.0.1:5678/admin`
-2. 输入 `config.json` 中配置的 `adminApiKey` 登录
+2. **输入 `config.json` 中配置的 `adminApiKey` 登录**
 3. 进入凭据管理页面
 4. 将导出的 JSON 内容**直接粘贴**到输入框，或将 JSON 文件**拖拽**到页面上
 5. 管理面板自动识别账号信息并显示，确认后保存即可
@@ -355,7 +361,6 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 `priority` 数值越小优先级越高，单凭据最多重试 3 次，单请求最多重试 9 次，自动故障转移。
 
 ---
-
 ## 配置详解
 
 ### config.json 字段说明
@@ -368,14 +373,12 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 | `region` | 否 | `us-east-1` | AWS 区域 |
 | `authRegion` | 否 | 同 `region` | Token 刷新使用的区域 |
 | `apiRegion` | 否 | 同 `region` | API 请求使用的区域 |
+| `adminApiKey` | 否 | — | 管理面板登录密码，不填则不启用管理面板 |
 | `proxyUrl` | 否 | — | HTTP/SOCKS5 代理，如 `http://127.0.0.1:7890` |
 | `proxyUsername` | 否 | — | 代理用户名 |
 | `proxyPassword` | 否 | — | 代理密码 |
 | `tlsBackend` | 否 | `rustls` | TLS 后端：`rustls` 或 `native-tls` |
 | `loadBalancingMode` | 否 | `priority` | `priority`（按优先级）或 `balanced`（轮询） |
-| `countTokensApiUrl` | 否 | — | 外部 count_tokens API 地址，设置后 `/v1/messages/count_tokens` 转发到该地址 |
-| `countTokensApiKey` | 否 | — | 外部 count_tokens API 密钥 |
-| `countTokensAuthType` | 否 | `x-api-key` | 外部 count_tokens 认证类型：`x-api-key` 或 `bearer` |
 
 > **TLS 说明**：如遇到 Token 刷新失败或请求报错，尝试将 `tlsBackend` 改为 `native-tls`。
 
@@ -383,10 +386,11 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 
 ```json
 {
-  "host": "127.0.0.1",
+  "host": "0.0.0.0",
   "port": 5678,
   "apiKey": "sk-my-proxy-key",
   "region": "us-east-1",
+  "adminApiKey": "my-admin-password",
   "proxyUrl": "http://127.0.0.1:7890",
   "tlsBackend": "rustls",
   "loadBalancingMode": "priority"
@@ -421,7 +425,6 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 **API Region**（API 请求）：`凭据.apiRegion` > `config.apiRegion` > `config.region`
 
 ---
-
 ## 接入 Claude Code
 
 ### 方式一：环境变量（推荐）
@@ -532,7 +535,6 @@ Authorization: Bearer your-api-key
 | `*opus*`（含 4.7/4-7） | `claude-opus-4.7` |
 | `*opus*`（其他） | `claude-opus-4.6` |
 | `*haiku*` | `claude-haiku-4.5` |
-| `auto` | `auto`（Kiro 智能路由） |
 | `*deepseek*` | `deepseek-3.2` |
 | `*glm*` | `glm-5` |
 | `*minimax*`（含 2.5/2-5） | `minimax-m2.5` |
@@ -543,7 +545,7 @@ Authorization: Bearer your-api-key
 
 ## Admin 管理面板
 
-访问 `http://127.0.0.1:5678/admin` 进入管理面板（需在 `config.json` 中配置 `adminApiKey`）。
+配置了 `adminApiKey` 后，访问 `http://127.0.0.1:5678/admin` 进入管理面板。
 
 功能：
 - 查看所有凭据状态（是否有效、失败次数等）
@@ -552,8 +554,6 @@ Authorization: Bearer your-api-key
 - 调整凭据优先级
 - 查看各账号余额
 - 重置账号失败状态
-- **API Key 管理**：创建 / 编辑 / 删除子 API Key，支持按日期或额度限制
-- **凭据绑定**：创建或编辑 API Key 时可绑定指定凭据，绑定后该 Key 的请求只使用该凭据，不参与全局调度；绑定凭据不可用时返回 503
 
 **Admin API**（需要 `x-api-key` 或 `Authorization: Bearer` 认证）：
 
@@ -563,13 +563,8 @@ Authorization: Bearer your-api-key
 | `/api/admin/credentials` | POST | 添加凭据 |
 | `/api/admin/credentials/:id` | DELETE | 删除凭据 |
 | `/api/admin/credentials/:id/balance` | GET | 查询余额 |
-| `/api/admin/api-keys` | GET | 获取所有子 API Key |
-| `/api/admin/api-keys` | POST | 创建子 API Key |
-| `/api/admin/api-keys/:id` | PUT | 更新子 API Key（含凭据绑定） |
-| `/api/admin/api-keys/:id` | DELETE | 删除子 API Key |
 
 ---
-
 ## 常见问题
 
 **Q：启动后提示"已加载 0 个凭据配置"**
@@ -607,6 +602,10 @@ lsof -ti:5678 | xargs kill -9
 
 输出过长被截断导致，调低客户端的 `max_tokens` 上限。
 
+**Q：局域网内其他设备无法访问**
+
+将 `config.json` 中的 `host` 改为 `0.0.0.0`，确认防火墙已开放对应端口。
+
 **Q：如何更新到最新版本**
 
 ```bash
@@ -638,7 +637,9 @@ kiro2cc-proxy-local/
 ├── build-mac.sh            # 一键构建脚本（macOS）
 ├── build-windows.ps1       # 一键构建脚本（Windows）
 ├── run-local-service-mac.sh         # macOS 本地启动脚本
-└── run-local-service-windows.ps1   # Windows 本地启动脚本
+├── run-local-service-windows.ps1   # Windows 本地启动脚本
+├── setup_shell_aliases.sh  # macOS Shell 快捷命令安装脚本
+└── setup_shell_aliases.ps1 # Windows PowerShell 快捷命令安装脚本
 ```
 
 ---

@@ -2,7 +2,7 @@
 
 A Rust-based Anthropic Claude API-compatible proxy that converts Anthropic API requests into Kiro API requests.
 
-> **✅ Supported Models: Claude Sonnet 4.5 / Claude Sonnet 4.6 / Claude Opus 4.5 / Claude Opus 4.6 / Claude Opus 4.7 / Claude Haiku 4.5 / DeepSeek 3.2 / GLM-5 / MiniMax M2.5 / MiniMax M2.1 / Qwen3 Coder Next**
+> **✅ Supported Models: Claude Sonnet 4.5 / Claude Sonnet 4.6 / Claude Opus 4.5 / Claude Opus 4.6 / Claude Opus 4.7 / Claude Haiku 4.5 / DeepSeek 3.2 / GLM-5 / MiniMax M2.1 / MiniMax M2.5 / Qwen3-Coder**
 
 [中文](README.md) | English
 
@@ -31,7 +31,6 @@ This project is for research purposes only. Use at your own risk. Any consequenc
 - [Quick Start (New Users)](#quick-start-new-users)
 - [Local Deployment (macOS)](#local-deployment-macos)
 - [Local Deployment (Windows)](#local-deployment-windows)
-- [Server Deployment (Linux)](#server-deployment-linux)
 - [Getting Kiro Credentials](#getting-kiro-credentials)
 - [Configuration Reference](#configuration-reference)
 - [Claude Code Integration](#claude-code-integration)
@@ -47,7 +46,9 @@ This project is for research purposes only. Use at your own risk. Any consequenc
 
 **What is this project?**
 
-kiro2cc-proxy is a local proxy service. It forwards standard Anthropic Claude API requests to Kiro (AWS's AI coding tool), allowing you to use Claude models for free with a Kiro account.
+kiro2cc-proxy is a proxy service. It forwards standard Anthropic Claude API requests to Kiro (AWS's AI coding tool), allowing you to use Claude Code with models from your Kiro account.
+
+> In short: it proxies the models on your logged-in Kiro account to Claude Code. Without it, you can only use those models inside Kiro IDE or Kiro CLI.
 
 **Prerequisites:**
 
@@ -62,7 +63,6 @@ Install dependencies → Build project → Start service → Add credentials →
 ```
 
 ---
-
 ## Local Deployment (macOS)
 
 ### Step 1: Install Dependencies
@@ -85,9 +85,27 @@ source "$HOME/.cargo/env"
 ### Step 2: Get the Code
 
 ```bash
-git clone https://github.com/TsinHzl/kiro2cc-proxy-local
+git clone https://github.com/TsinHzl/kiro2cc-proxy-local.git
 cd kiro2cc-proxy-local
 ```
+
+### (Optional) Install Shell Aliases
+
+Run the one-click installer to make `build_kiro2cc_proxy` and `run_kiro2cc_proxy` available from any terminal — no need to navigate to the project directory each time:
+
+```bash
+bash setup_shell_aliases.sh
+source ~/.zshrc   # zsh users; bash users run: source ~/.bashrc
+```
+
+After installation:
+
+```bash
+build_kiro2cc_proxy   # equivalent to ./build-mac.sh
+run_kiro2cc_proxy     # equivalent to ./run-local-service-mac.sh
+```
+
+> macOS only. Modifies `~/.zshrc` and `~/.bashrc` (if they exist). Safe to run multiple times (idempotent).
 
 ### Step 3: Build the Project
 
@@ -120,18 +138,24 @@ In Finder, navigate to the project directory and double-click `run-local-service
 **First launch** shows a setup wizard:
 
 ```
-  API Key (access key for this proxy, set anything you like): sk-my-proxy-key
-  Admin API Key (admin panel password, press Enter to skip): my-admin-pass
-  Port [default: 5678]:
-  Region [default: us-east-1]:
-  Local HTTP proxy port (press Enter to skip, e.g. 7890 / 10089): 7890
+API Key (access key for this proxy, set anything you like, optional): [default: sk-my-proxy-key]
+Admin API Key (admin panel password (http://ip:port/admin), required): [default: my-admin-pass]
+Port [default: 5678]:
+Region [default: us-east-1]:
+Local HTTP proxy port (e.g. 7890 / 10089): [enter your proxy port]
 ```
 
-- **API Key**: Set any value — clients use this to authenticate
-- **Admin API Key**: Password for the admin panel, recommended
-- > ⚠️ **[CRITICAL] Proxy port (required for mainland China users)**: Without a proxy, Claude models are completely inaccessible. Enter the HTTP listen port of your local proxy software (Clash/V2Ray/Shadowsocks etc.), e.g. `7890` or `10089`. Check your proxy app's settings if you're unsure of the port number.
+- **⚠️ [CRITICAL] Local HTTP proxy port**: This is the port your VPN/proxy software listens on. **Without it, Claude models such as Claude 4.6 and Claude 4.7 will be inaccessible when running locally.**
 
-After setup, `app/config/config.json` is generated, the service starts, and the admin panel opens in your browser.
+- > ⚠️ **[CRITICAL] Proxy port (required for mainland China users)**
+  >
+  > A common way to check: run `export http_proxy=http://127.0.0.1:10089; export https_proxy=http://127.0.0.1:10089;` in your terminal — the `10089` here is your proxy port.
+  >
+  > If you don't know the port number, check the settings page of your proxy software.
+
+- **Admin API Key**: **The login password for the admin panel (http://ip:port/admin). Setting this is recommended.**
+
+After setup, `app/config/config.json` is generated, the service starts, and the admin panel opens in your browser automatically.
 
 **Subsequent launches** read the existing config — no wizard needed.
 
@@ -146,7 +170,6 @@ Alternatively, create `app/config/credentials.json` directly — see [Getting Ki
 Press `Ctrl+C` in the terminal running the service, or close the terminal window.
 
 ---
-
 ## Local Deployment (Windows)
 
 ### Step 1: Install Dependencies
@@ -166,9 +189,27 @@ git -v
 ### Step 2: Get the Code
 
 ```powershell
-git clone https://github.com/TsinHzl/kiro2cc-proxy-local
+git clone https://github.com/TsinHzl/kiro2cc-proxy-local.git
 cd kiro2cc-proxy-local
 ```
+
+### (Optional) Install PowerShell Aliases
+
+Run the one-click installer to make `build_kiro2cc_proxy` and `run_kiro2cc_proxy` available from any PowerShell window — no need to navigate to the project directory each time:
+
+```powershell
+.\setup_shell_aliases.ps1
+. $PROFILE
+```
+
+After installation:
+
+```powershell
+build_kiro2cc_proxy   # equivalent to .\build-windows.ps1
+run_kiro2cc_proxy     # equivalent to .\run-local-service-windows.ps1
+```
+
+> Updates both Windows PowerShell 5.x and PowerShell 7+ profiles. Safe to run multiple times (idempotent).
 
 ### Step 3: Build the Project
 
@@ -197,16 +238,24 @@ This script builds the admin-ui frontend, user-ui frontend, and then compiles th
 **First launch** shows a setup wizard:
 
 ```
-  API Key (access key for this proxy, set anything you like): sk-my-proxy-key
-  Admin API Key (admin panel password, press Enter to skip): my-admin-pass
-  Port [default: 5678]:
-  Region [default: us-east-1]:
-  Local HTTP proxy port (press Enter to skip, e.g. 7890 / 10089): 7890
+API Key (access key for this proxy, set anything you like, optional): [default: sk-my-proxy-key]
+Admin API Key (admin panel password (http://ip:port/admin), required): [default: my-admin-pass]
+Port [default: 5678]:
+Region [default: us-east-1]:
+Local HTTP proxy port (e.g. 7890 / 10089): [enter your proxy port]
 ```
 
-- > ⚠️ **[CRITICAL] Proxy port (required for mainland China users)**: Without a proxy, Claude models are completely inaccessible. Enter the HTTP listen port of your local proxy software (Clash/V2Ray/Shadowsocks etc.), e.g. `7890` or `10089`.
+- **⚠️ [CRITICAL] Local HTTP proxy port**: This is the port your VPN/proxy software listens on. **Without it, Claude models such as Claude 4.6 and Claude 4.7 will be inaccessible when running locally.**
 
-After setup, `app\config\config.json` is generated, the service starts, and the admin panel opens in your browser.
+- > ⚠️ **[CRITICAL] Proxy port (required for mainland China users)**
+  >
+  > A common way to check: run `export http_proxy=http://127.0.0.1:10089; export https_proxy=http://127.0.0.1:10089;` in your terminal — the `10089` here is your proxy port.
+  >
+  > If you don't know the port number, check the settings page of your proxy software.
+
+- **Admin API Key**: **The login password for the admin panel (http://ip:port/admin). Setting this is recommended.**
+
+After setup, `app\config\config.json` is generated, the service starts, and the admin panel opens in your browser automatically.
 
 **Subsequent launches** read the existing config — no wizard needed.
 
@@ -219,104 +268,6 @@ After the service starts, open the admin panel at `http://127.0.0.1:5678/admin` 
 Press `Ctrl+C` in the PowerShell window, or close the window.
 
 ---
-
-## Server Deployment (Linux)
-
-### Option 1: Docker (Simplest, Recommended)
-
-**Requirements**: Docker and Docker Compose installed on the server.
-
-```bash
-# 1. Clone the repo
-git clone https://github.com/TsinHzl/kiro2cc-proxy-local /opt/kiro2cc-proxy-local
-cd /opt/kiro2cc-proxy-local
-
-# 2. Create data directory and config
-mkdir -p data
-cp config.example.json data/config.json
-nano data/config.json   # Fill in apiKey and adminApiKey
-```
-
-Minimal `data/config.json`:
-
-```json
-{
-  "host": "0.0.0.0",
-  "port": 5678,
-  "apiKey": "sk-your-api-key",
-  "region": "us-east-1",
-  "adminApiKey": "your-admin-password"
-}
-```
-
-```bash
-# 3. Create credentials file (or add via admin panel after startup)
-nano data/credentials.json
-
-# 4. Start
-docker compose up -d
-
-# View logs
-docker compose logs -f
-
-# Stop
-docker compose down
-```
-
-Access the admin panel at `http://your-server-ip:5678/admin`.
-
-> **Note**: Docker Compose defaults to `127.0.0.1:5678`. For external access, change `ports` in `docker-compose.yml` to `"0.0.0.0:5678:5678"` and open the port in your firewall.
-
-### Option 2: systemd One-Click Install
-
-For running the binary directly without Docker.
-
-```bash
-# 1. Clone the repo
-git clone https://github.com/TsinHzl/kiro2cc-proxy-local /opt/kiro2cc-proxy-local
-cd /opt/kiro2cc-proxy-local
-
-# 2. Create config
-cp config.example.json app/config/config.json
-nano app/config/config.json   # Fill in apiKey
-
-# 3. Install (auto-compiles + registers systemd service)
-sudo bash install_server.sh
-```
-
-The service starts automatically on boot. Common commands:
-
-```bash
-systemctl status kiro2cc-proxy       # Check status
-systemctl restart kiro2cc-proxy      # Restart
-systemctl stop kiro2cc-proxy         # Stop
-journalctl -u kiro2cc-proxy -f       # Live logs
-```
-
-### Option 3: Manual Background Process (No systemd)
-
-```bash
-bash start_server.sh start     # Start in background
-bash start_server.sh status    # Check status
-bash start_server.sh log       # Live logs
-bash start_server.sh stop      # Stop
-bash start_server.sh restart   # Restart
-```
-
-### Proxy Configuration for Servers
-
-Servers in mainland China cannot access Kiro API directly. Add a proxy to `config.json`:
-
-```json
-{
-  "proxyUrl": "http://your-proxy-host:port"
-}
-```
-
-Using an overseas server is recommended — no proxy needed.
-
----
-
 ## Getting Kiro Credentials
 
 ### Full Flow: Export from Kiro Account Manager → Import via Admin Panel
@@ -330,17 +281,17 @@ Using an overseas server is recommended — no proxy needed.
 
 **Step 2: Start the kiro2cc-proxy service**
 
-Follow the [Local Deployment](#local-deployment-macos) or [Server Deployment](#server-deployment-linux) section to start the service.
+Follow the [Local Deployment](#local-deployment-macos) section to start the service and confirm it is running.
 
 **Step 3: Import credentials via the Admin Panel (recommended)**
 
-1. Open the admin panel: `http://127.0.0.1:5678/admin` (replace with your server IP for server deployments)
-2. Log in with the `adminApiKey` configured in `config.json`
+1. Open the admin panel: `http://127.0.0.1:5678/admin`
+2. **Log in with the `adminApiKey` configured in `config.json`**
 3. Go to the credentials management page
 4. **Paste** the exported JSON content into the input field, or **drag and drop** the JSON file onto the page
 5. The panel automatically recognizes the account info and displays it — confirm to save
 
-> ⚠️ **Importing credentials fails when accessing the admin panel over HTTP**
+> ⚠️ **[CRITICAL] Importing credentials fails when accessing the admin panel over HTTP**
 >
 > If you access the admin panel via `http://server-ip:port/admin` (not HTTPS, not localhost), the browser's security policy disables the `crypto.subtle` encryption API, causing an error `Cannot read properties of undefined (reading 'digest')` during import. The backend will show no error logs.
 >
@@ -351,13 +302,12 @@ Follow the [Local Deployment](#local-deployment-macos) or [Server Deployment](#s
 > Chrome: open `chrome://flags/#unsafely-treat-insecure-origin-as-secure`
 > Edge: open `edge://flags/#unsafely-treat-insecure-origin-as-secure`
 >
-> Enter your full address (e.g. `http://43.153.11.66:8990`) in the text box under "Insecure origins treated as secure", set the toggle to **Enabled**, then click **Relaunch** to restart the browser.
+> Enter your full address (e.g. `http://43.153.11.66:8990`) in the text box under "Insecure origins treated as secure", set the toggle to **Enabled**, then click **Relaunch** to restart the browser and retry.
 
 **Step 4 (optional): Create the credentials file manually**
 
 You can skip the admin panel and save the exported JSON directly as a file:
 - Local deployment: `app/config/credentials.json`
-- Docker deployment: `data/credentials.json`
 
 See the format reference below. Restart the service after saving.
 
@@ -407,7 +357,6 @@ See the format reference below. Restart the service after saving.
 Lower `priority` value = higher priority. Up to 3 retries per credential, 9 per request, with automatic failover.
 
 ---
-
 ## Configuration Reference
 
 ### config.json Fields
@@ -415,7 +364,7 @@ Lower `priority` value = higher priority. Up to 3 retries per credential, 9 per 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
 | `apiKey` | **Yes** | — | API key for client authentication, set any value |
-| `host` | No | `127.0.0.1` | Listen address; `0.0.0.0` allows external/LAN access |
+| `host` | No | `127.0.0.1` | Listen address |
 | `port` | No | `5678` | Listen port |
 | `region` | No | `us-east-1` | AWS region |
 | `authRegion` | No | same as `region` | Region used for token refresh |
@@ -425,10 +374,7 @@ Lower `priority` value = higher priority. Up to 3 retries per credential, 9 per 
 | `proxyUsername` | No | — | Proxy username |
 | `proxyPassword` | No | — | Proxy password |
 | `tlsBackend` | No | `rustls` | TLS backend: `rustls` or `native-tls` |
-| `loadBalancingMode` | No | `priority` | `priority` or `balanced` (round-robin) |
-| `countTokensApiUrl` | No | — | External count_tokens API URL; if set, `/v1/messages/count_tokens` is forwarded there |
-| `countTokensApiKey` | No | — | API key for the external count_tokens endpoint |
-| `countTokensAuthType` | No | `x-api-key` | Auth type for external count_tokens: `x-api-key` or `bearer` |
+| `loadBalancingMode` | No | `priority` | `priority` (by priority) or `balanced` (round-robin) |
 
 > **TLS note**: If you encounter token refresh failures or request errors, try switching `tlsBackend` to `native-tls`.
 
@@ -491,7 +437,7 @@ export ANTHROPIC_API_KEY="API key created in the admin panel's API Key Managemen
 
 ```bash
 echo 'export ANTHROPIC_BASE_URL="http://127.0.0.1:5678"' >> ~/.zshrc
-echo 'export ANTHROPIC_API_KEY="your-api-key"' >> ~/.zshrc
+echo 'export ANTHROPIC_API_KEY="API key created in the admin panel's API Key Management page"' >> ~/.zshrc
 source ~/.zshrc
 ```
 
@@ -540,7 +486,6 @@ curl http://127.0.0.1:5678/v1/messages \
 ```
 
 ---
-
 ## API Endpoints
 
 ### Standard Endpoints (/v1)
@@ -558,7 +503,7 @@ curl http://127.0.0.1:5678/v1/messages \
 | `/cc/v1/messages` | POST | Buffered mode with accurate `input_tokens` |
 | `/cc/v1/messages/count_tokens` | POST | Estimate token count |
 
-> `/cc/v1/messages` buffers the full upstream stream before returning, providing accurate `input_tokens` from `contextUsageEvent`. Sends `ping` events every 25 seconds while waiting.
+> `/cc/v1/messages` waits for the full upstream stream to complete before returning. `input_tokens` uses the actual value rather than an estimate. Sends a `ping` keepalive every 25 seconds while waiting.
 
 ### Client Authentication
 
@@ -576,7 +521,7 @@ Authorization: Bearer your-api-key
 
 ## Model Mapping
 
-Any model name containing the following keywords is automatically mapped:
+Any model name containing the following keywords is automatically mapped to the corresponding Kiro model:
 
 | Request model name (keyword) | Kiro model used |
 |------------------------------|----------------|
@@ -586,7 +531,6 @@ Any model name containing the following keywords is automatically mapped:
 | `*opus*` (including 4.7/4-7) | `claude-opus-4.7` |
 | `*opus*` (others) | `claude-opus-4.6` |
 | `*haiku*` | `claude-haiku-4.5` |
-| `auto` | `auto` (Kiro smart routing) |
 | `*deepseek*` | `deepseek-3.2` |
 | `*glm*` | `glm-5` |
 | `*minimax*` (including 2.5/2-5) | `minimax-m2.5` |
@@ -622,7 +566,7 @@ Features:
 
 **Q: Service starts but shows "0 credentials loaded"**
 
-Create `app/config/credentials.json` (local) or `data/credentials.json` (Docker). See [Getting Kiro Credentials](#getting-kiro-credentials).
+Create `app/config/credentials.json`. See [Getting Kiro Credentials](#getting-kiro-credentials).
 
 **Q: Requests return `INVALID_MODEL_ID`**
 
@@ -687,14 +631,12 @@ kiro2cc-proxy-local/
 ├── user-ui/                # User panel frontend
 ├── app/config/             # Local config directory (gitignored)
 ├── config.example.json     # Config example
-├── docker-compose.yml      # Docker deployment config
-├── Dockerfile              # Docker image build
 ├── build-mac.sh            # One-click build script (macOS)
 ├── build-windows.ps1       # One-click build script (Windows)
 ├── run-local-service-mac.sh         # macOS local startup script
 ├── run-local-service-windows.ps1   # Windows local startup script
-├── install_server.sh       # Linux systemd one-click install
-└── start_server.sh         # Linux manual background process manager
+├── setup_shell_aliases.sh  # macOS shell alias installer
+└── setup_shell_aliases.ps1 # Windows PowerShell alias installer
 ```
 
 ---
