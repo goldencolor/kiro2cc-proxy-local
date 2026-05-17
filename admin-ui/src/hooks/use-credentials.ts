@@ -254,11 +254,13 @@ export function useSetAuthKeys() {
   })
 }
 
+const USAGE_LOG_PAGE_SIZE = 50
+
 // 查询凭据逐条使用日志
 export function useCredentialUsageRecords(id: number, page: number) {
   return useQuery({
-    queryKey: ['credentialUsageRecords', id, page],
-    queryFn: () => getCredentialUsageRecords(id, page, 50),
+    queryKey: ['credential-usage-records', id, page],
+    queryFn: () => getCredentialUsageRecords(id, page, USAGE_LOG_PAGE_SIZE),
     enabled: id > 0,
   })
 }
@@ -266,8 +268,8 @@ export function useCredentialUsageRecords(id: number, page: number) {
 // 查询 API Key 逐条使用日志
 export function useApiKeyUsageRecords(id: number, page: number) {
   return useQuery({
-    queryKey: ['apiKeyUsageRecords', id, page],
-    queryFn: () => getApiKeyUsageRecords(id, page, 50),
+    queryKey: ['api-key-usage-records', id, page],
+    queryFn: () => getApiKeyUsageRecords(id, page, USAGE_LOG_PAGE_SIZE),
     enabled: id > 0,
   })
 }
