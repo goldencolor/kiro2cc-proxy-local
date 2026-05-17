@@ -13,6 +13,16 @@ use super::{
     types::{AdminErrorResponse, CreateApiKeyRequest, SuccessResponse, UpdateApiKeyRequest},
 };
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UsageRecordsResponse {
+    records: Vec<crate::model::usage::UsageRecord>,
+    total: usize,
+    page: usize,
+    page_size: usize,
+    total_pages: usize,
+}
+
 /// GET /api/admin/server-info
 /// 获取服务器连接信息（主 API Key）
 pub async fn get_server_info(State(state): State<AdminState>) -> impl IntoResponse {
@@ -157,4 +167,38 @@ pub async fn get_rpm(State(state): State<AdminState>) -> impl IntoResponse {
         return (StatusCode::SERVICE_UNAVAILABLE, Json(error)).into_response();
     };
     Json(rpm_tracker.snapshot()).into_response()
+}
+
+/// GET /api/admin/credentials/:id/usage?page=1&page_size=50
+pub async fn get_credential_usage(
+    State(state): State<AdminState>,
+    Path(id): Path<u64>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    let Some(tracker) = &state.usage_tracker else {
+        let error = AdminErrorResponse::internal_error("用量追踪未启用");
+        return (StatusCode::SERVICE_UNAVAILABLE, Json(error)).into_response();
+    };
+    let page = params.get("page").and_then(|v| v.parse().ok()).unwrap_or(1usize);
+    let page_size = params.get("page_size").and_then(|v| v.parse().ok()).unwrap_or(50usize);
+    let (records, total) = tracker.get_records_by_credential(id, page, page_size);
+    let total_pages = if page_size == 0 { 1 } else { (total + page_size - 1) / page_size };
+    Json(UsageRecordsResponse { records, total, page, page_size, total_pages }).into_response()
+}
+
+/// GET /api/admin/api-keys/:id/usage/records?page=1&page_size=50
+pub async fn get_api_key_usage_records(
+    State(state): State<AdminState>,
+    Path(id): Path<u32>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    let Some(tracker) = &state.usage_tracker else {
+        let error = AdminErrorResponse::internal_error("用量追踪未启用");
+        return (StatusCode::SERVICE_UNAVAILABLE, Json(error)).into_response();
+    };
+    let page = params.get("page").and_then(|v| v.parse().ok()).unwrap_or(1usize);
+    let page_size = params.get("page_size").and_then(|v| v.parse().ok()).unwrap_or(50usize);
+    let (records, total) = tracker.get_records_by_api_key(id, page, page_size);
+    let total_pages = if page_size == 0 { 1 } else { (total + page_size - 1) / page_size };
+    Json(UsageRecordsResponse { records, total, page, page_size, total_pages }).into_response()
 }

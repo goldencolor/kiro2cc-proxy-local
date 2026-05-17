@@ -7,7 +7,8 @@ use axum::{
 
 use super::{
     api_keys::{
-        create_api_key, delete_api_key, get_all_usage, get_key_usage, get_rpm, get_server_info,
+        create_api_key, delete_api_key, get_all_usage, get_api_key_usage_records,
+        get_credential_usage, get_key_usage, get_rpm, get_server_info,
         list_api_keys, reset_key_usage, update_api_key,
     },
     handlers::{
@@ -32,6 +33,8 @@ pub fn create_admin_router(state: AdminState) -> Router {
         .route("/credentials/{id}/priority", post(set_credential_priority))
         .route("/credentials/{id}/reset", post(reset_failure_count))
         .route("/credentials/{id}/balance", get(get_credential_balance))
+        .route("/credentials/{id}/usage", get(get_credential_usage))
+        .route("/api-keys/{id}/usage/records", get(get_api_key_usage_records))
         .route(
             "/config/load-balancing",
             get(get_load_balancing_mode).put(set_load_balancing_mode),
