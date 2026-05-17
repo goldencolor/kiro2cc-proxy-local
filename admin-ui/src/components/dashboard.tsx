@@ -14,6 +14,7 @@ import { KamImportDialog } from '@/components/kam-import-dialog'
 import { BatchVerifyDialog, type VerifyResult } from '@/components/batch-verify-dialog'
 import { ApiKeysPanel } from '@/components/api-keys-panel'
 import { SettingsPanel } from '@/components/settings-panel'
+import { UsageLogPage } from '@/components/usage-log-page'
 import { useCredentials, useDeleteCredential, useResetFailure, useRpm } from '@/hooks/use-credentials'
 import { getCredentialBalance } from '@/api/credentials'
 import { extractErrorMessage } from '@/lib/utils'
@@ -25,6 +26,7 @@ interface DashboardProps {
 
 export function Dashboard({ onLogout }: DashboardProps) {
   const [activeTab, setActiveTab] = useState<'credentials' | 'apikeys' | 'settings'>('credentials')
+  const [detailCredentialId, setDetailCredentialId] = useState<number | null>(null)
   const [selectedCredentialId, setSelectedCredentialId] = useState<number | null>(null)
   const [balanceDialogOpen, setBalanceDialogOpen] = useState(false)
   const [addDialogOpen, setAddDialogOpen] = useState(false)
@@ -697,6 +699,12 @@ export function Dashboard({ onLogout }: DashboardProps) {
                 暂无凭据
               </CardContent>
             </Card>
+          ) : detailCredentialId !== null ? (
+            <UsageLogPage
+              mode="credential"
+              credential={data!.credentials.find(c => c.id === detailCredentialId)!}
+              onBack={() => setDetailCredentialId(null)}
+            />
           ) : (
             <>
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -705,6 +713,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
                     key={credential.id}
                     credential={credential}
                     onViewBalance={handleViewBalance}
+                    onViewLog={(id) => setDetailCredentialId(id)}
                     selected={selectedIds.has(credential.id)}
                     onToggleSelect={() => toggleSelect(credential.id)}
                     balance={balanceMap.get(credential.id) || null}
