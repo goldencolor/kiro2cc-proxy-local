@@ -16,6 +16,9 @@ use std::path::{Path, PathBuf};
 pub struct UsageRecord {
     /// API Key ID（0 = 主密钥）
     pub api_key_id: u32,
+    /// Credential ID
+    #[serde(default)]
+    pub credential_id: Option<u64>,
     /// 模型名称
     pub model: String,
     /// 输入 tokens
@@ -136,6 +139,7 @@ impl UsageTracker {
     pub fn record(
         &self,
         api_key_id: u32,
+        credential_id: Option<u64>,
         model: String,
         input_tokens: i32,
         output_tokens: i32,
@@ -143,6 +147,7 @@ impl UsageTracker {
         let cost = calculate_cost(&model, input_tokens, output_tokens);
         let record = UsageRecord {
             api_key_id,
+            credential_id,
             model,
             input_tokens,
             output_tokens,
@@ -217,5 +222,43 @@ impl UsageTracker {
             .filter(|r| r.api_key_id == api_key_id)
             .map(|r| r.estimated_cost)
             .sum()
+    }
+
+    /// 按 credential_id 分页查询用量记录，返回 (records, total)
+    pub fn get_records_by_credential(
+        &self,
+        credential_id: u64,
+        page: usize,
+        page_size: usize,
+    ) -> (Vec<UsageRecord>, usize) {
+        let records = self.records.read();
+        let mut filtered: Vec<&UsageRecord> = records
+            .iter()
+            .filter(|r| r.credential_id == Some(credential_id))
+            .collect();
+        filtered.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        let total = filtered.len();
+        let start = page.saturating_sub(1) * page_size;
+        let page_records = filtered.into_iter().skip(start).take(page_size).cloned().collect();
+        (page_records, total)
+    }
+
+    /// 按 api_key_id 分页查询用量记录，返回 (records, total)
+    pub fn get_records_by_api_key(
+        &self,
+        api_key_id: u32,
+        page: usize,
+        page_size: usize,
+    ) -> (Vec<UsageRecord>, usize) {
+        let records = self.records.read();
+        let mut filtered: Vec<&UsageRecord> = records
+            .iter()
+            .filter(|r| r.api_key_id == api_key_id)
+            .collect();
+        filtered.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        let total = filtered.len();
+        let start = page.saturating_sub(1) * page_size;
+        let page_records = filtered.into_iter().skip(start).take(page_size).cloned().collect();
+        (page_records, total)
     }
 }
