@@ -321,15 +321,9 @@ export function ApiKeysPanel() {
     return existingNumbers.has(num)
   })()
 
-  const filteredKeys = (apiKeys ?? []).filter((key) => {
-    if (!searchQuery.trim()) return true
-    const q = searchQuery.trim().toLowerCase()
-    const serialStr = String(key.id).padStart(3, '0')
-    return serialStr.includes(q) || String(key.id).includes(q) || key.name.toLowerCase().includes(q)
-  })
   if (view === 'detail' && detailKeyId !== null) {
     const apiKey = apiKeys?.find(k => k.id === detailKeyId)
-    if (!apiKey) return null  // will be dismissed by useEffect
+    if (!apiKey) return null  // guard for the render before useEffect fires
     return (
       <UsageLogPage
         mode="apikey"
@@ -339,6 +333,13 @@ export function ApiKeysPanel() {
       />
     )
   }
+
+  const filteredKeys = (apiKeys ?? []).filter((key) => {
+    if (!searchQuery.trim()) return true
+    const q = searchQuery.trim().toLowerCase()
+    const serialStr = String(key.id).padStart(3, '0')
+    return serialStr.includes(q) || String(key.id).includes(q) || key.name.toLowerCase().includes(q)
+  })
 
   return (
     <div className="space-y-4">
