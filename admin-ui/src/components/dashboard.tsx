@@ -70,10 +70,20 @@ export function Dashboard({ onLogout }: DashboardProps) {
     return Boolean(credential?.disabled)
   }).length
 
+  const detailCredential = detailCredentialId !== null
+    ? (data?.credentials.find(c => c.id === detailCredentialId) ?? null)
+    : null
+
   // 当凭据列表变化时重置到第一页
   useEffect(() => {
     setCurrentPage(1)
   }, [data?.credentials.length])
+
+  useEffect(() => {
+    if (detailCredentialId !== null && data && !data.credentials.find(c => c.id === detailCredentialId)) {
+      setDetailCredentialId(null)
+    }
+  }, [data, detailCredentialId])
 
   // 只保留当前仍存在的凭据缓存，避免删除后残留旧数据
   useEffect(() => {
@@ -614,6 +624,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
 
         {/* 凭据列表 */}
         <div className="space-y-4">
+          {detailCredentialId === null && (
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               <h2 className="text-xl font-semibold">凭据管理</h2>
@@ -693,16 +704,17 @@ export function Dashboard({ onLogout }: DashboardProps) {
               </Button>
             </div>
           </div>
+          )}
           {data?.credentials.length === 0 ? (
             <Card>
               <CardContent className="py-8 text-center text-muted-foreground">
                 暂无凭据
               </CardContent>
             </Card>
-          ) : detailCredentialId !== null ? (
+          ) : detailCredential !== null ? (
             <UsageLogPage
               mode="credential"
-              credential={data!.credentials.find(c => c.id === detailCredentialId)!}
+              credential={detailCredential}
               onBack={() => setDetailCredentialId(null)}
             />
           ) : (
@@ -713,7 +725,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
                     key={credential.id}
                     credential={credential}
                     onViewBalance={handleViewBalance}
-                    onViewLog={(id) => setDetailCredentialId(id)}
+                    onViewLog={setDetailCredentialId}
                     selected={selectedIds.has(credential.id)}
                     onToggleSelect={() => toggleSelect(credential.id)}
                     balance={balanceMap.get(credential.id) || null}
