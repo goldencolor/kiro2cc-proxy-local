@@ -17,11 +17,6 @@
 *.command
 !run-local-service-mac.command
 .DS_Store
-/user-ui/node_modules/
-/user-ui/dist/
-/user-ui/tsconfig.tsbuildinfo
-/user-ui/pnpm-lock.yaml
-/user-ui/package-lock.json
 
 # Runtime files
 kiro-rs.pid

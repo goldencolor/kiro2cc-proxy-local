@@ -1,5 +1,5 @@
 # kiro2cc-proxy Windows 一键构建脚本
-# 依次构建 admin-ui、user-ui 前端，再编译 Rust 二进制
+# 依次构建 admin-ui 前端，再编译 Rust 二进制
 # 用法: .\build-windows.ps1
 
 $ErrorActionPreference = "Stop"
@@ -27,23 +27,16 @@ if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
 }
 
 Write-Host ""
-Write-Host "[1/3] 构建 admin-ui..."
+Write-Host "[1/2] 构建 admin-ui..."
 Set-Location "$SCRIPT_DIR\admin-ui"
 npm install --registry $NPM_REGISTRY --progress
 npm run build
 Set-Location $SCRIPT_DIR
 Write-Host "[*] admin-ui 构建完成 ✓"
 
-Write-Host ""
-Write-Host "[2/3] 构建 user-ui..."
-Set-Location "$SCRIPT_DIR\user-ui"
-npm install --registry $NPM_REGISTRY --progress
-npm run build
-Set-Location $SCRIPT_DIR
-Write-Host "[*] user-ui 构建完成 ✓"
 
 Write-Host ""
-Write-Host "[3/3] 编译 Rust 二进制..."
+Write-Host "[2/2] 编译 Rust 二进制..."
 cargo build --release
 Write-Host "[*] 编译完成 ✓"
 

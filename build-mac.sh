@@ -1,6 +1,6 @@
 #!/bin/bash
 # kiro-rs 一键构建脚本
-# 依次构建 admin-ui、user-ui 前端，再编译 Rust 二进制
+# 依次构建 admin-ui 前端，再编译 Rust 二进制
 
 set -eo pipefail
 
@@ -29,7 +29,7 @@ if ! command -v cargo &>/dev/null; then
 fi
 
 echo ""
-echo "[1/3] 构建 admin-ui..."
+echo "[1/2] 构建 admin-ui..."
 cd admin-ui
 log "npm install 开始 (registry: $NPM_REGISTRY)"
 npm install --registry "$NPM_REGISTRY" --progress
@@ -38,18 +38,9 @@ npm run build
 cd ..
 log "admin-ui 构建完成 ✓"
 
-echo ""
-echo "[2/3] 构建 user-ui..."
-cd user-ui
-log "npm install 开始 (registry: $NPM_REGISTRY)"
-npm install --registry "$NPM_REGISTRY" --progress
-log "npm install 完成，开始 build..."
-npm run build
-cd ..
-log "user-ui 构建完成 ✓"
 
 echo ""
-echo "[3/3] 编译 Rust 二进制..."
+echo "[2/2] 编译 Rust 二进制..."
 log "cargo build --release 开始..."
 cargo build --release
 log "编译完成 ✓"

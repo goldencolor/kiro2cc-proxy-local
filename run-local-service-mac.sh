@@ -124,9 +124,9 @@ fi
 echo "=================================================="
 echo ""
 
-# 延迟 2 秒后自动打开管理面板（如果有 adminApiKey）
+# 延迟 3 秒后自动打开管理面板（如果有 adminApiKey）
 if grep -q '"adminApiKey"' "$CONFIG_FILE" 2>/dev/null; then
-    (sleep 2 && open "http://127.0.0.1:${CONFIGURED_PORT}/admin") &
+    (sleep 3 && open "http://127.0.0.1:${CONFIGURED_PORT}/admin") &
 fi
 
 # 前台运行，关闭终端窗口即停止
