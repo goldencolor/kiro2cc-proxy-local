@@ -34,7 +34,6 @@ pub fn create_admin_router(state: AdminState) -> Router {
         .route("/credentials/{id}/reset", post(reset_failure_count))
         .route("/credentials/{id}/balance", get(get_credential_balance))
         .route("/credentials/{id}/usage", get(get_credential_usage))
-        .route("/api-keys/{id}/usage/records", get(get_api_key_usage_records))
         .route(
             "/config/load-balancing",
             get(get_load_balancing_mode).put(set_load_balancing_mode),
@@ -49,6 +48,7 @@ pub fn create_admin_router(state: AdminState) -> Router {
         .route("/api-keys/usage", get(get_all_usage))
         .route("/api-keys/{id}", put(update_api_key).delete(delete_api_key))
         .route("/api-keys/{id}/usage", get(get_key_usage).delete(reset_key_usage))
+        .route("/api-keys/{id}/usage/records", get(get_api_key_usage_records))
         // RPM 监控
         .route("/rpm", get(get_rpm))
         .layer(middleware::from_fn_with_state(

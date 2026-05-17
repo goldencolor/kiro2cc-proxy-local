@@ -180,6 +180,7 @@ pub async fn get_credential_usage(
         return (StatusCode::SERVICE_UNAVAILABLE, Json(error)).into_response();
     };
     let page = params.get("page").and_then(|v| v.parse().ok()).unwrap_or(1usize);
+    let page = page.max(1);
     let page_size = params.get("page_size").and_then(|v| v.parse().ok()).unwrap_or(50usize);
     let (records, total) = tracker.get_records_by_credential(id, page, page_size);
     let total_pages = if page_size == 0 { 1 } else { (total + page_size - 1) / page_size };
@@ -197,6 +198,7 @@ pub async fn get_api_key_usage_records(
         return (StatusCode::SERVICE_UNAVAILABLE, Json(error)).into_response();
     };
     let page = params.get("page").and_then(|v| v.parse().ok()).unwrap_or(1usize);
+    let page = page.max(1);
     let page_size = params.get("page_size").and_then(|v| v.parse().ok()).unwrap_or(50usize);
     let (records, total) = tracker.get_records_by_api_key(id, page, page_size);
     let total_pages = if page_size == 0 { 1 } else { (total + page_size - 1) / page_size };
