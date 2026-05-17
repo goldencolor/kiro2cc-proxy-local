@@ -14,6 +14,7 @@ import type {
   UpdateApiKeyRequest,
   UsageSummary,
   RpmSnapshot,
+  UsageRecordsResponse,
 } from '@/types/api'
 
 // 创建 axios 实例
@@ -180,5 +181,31 @@ export async function getAuthKeys(): Promise<{ apiKey: string; adminApiKey: stri
 
 export async function setAuthKeys(payload: { apiKey?: string; adminApiKey?: string }): Promise<{ success: boolean; message: string }> {
   const { data } = await api.put<{ success: boolean; message: string }>('/config/auth-keys', payload)
+  return data
+}
+
+// 获取凭据逐条使用日志（分页）
+export async function getCredentialUsageRecords(
+  id: number,
+  page: number,
+  pageSize: number
+): Promise<UsageRecordsResponse> {
+  const { data } = await api.get<UsageRecordsResponse>(
+    `/credentials/${id}/usage`,
+    { params: { page, page_size: pageSize } }
+  )
+  return data
+}
+
+// 获取 API Key 逐条使用日志（分页）
+export async function getApiKeyUsageRecords(
+  id: number,
+  page: number,
+  pageSize: number
+): Promise<UsageRecordsResponse> {
+  const { data } = await api.get<UsageRecordsResponse>(
+    `/api-keys/${id}/usage/records`,
+    { params: { page, page_size: pageSize } }
+  )
   return data
 }

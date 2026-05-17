@@ -20,6 +20,8 @@ import {
   getRpm,
   getAuthKeys,
   setAuthKeys,
+  getCredentialUsageRecords,
+  getApiKeyUsageRecords,
 } from '@/api/credentials'
 import type { AddCredentialRequest, UpdateCredentialRequest, CreateApiKeyRequest, UpdateApiKeyRequest, BalanceResponse } from '@/types/api'
 
@@ -249,5 +251,23 @@ export function useSetAuthKeys() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['auth-keys'] })
     },
+  })
+}
+
+// 查询凭据逐条使用日志
+export function useCredentialUsageRecords(id: number, page: number) {
+  return useQuery({
+    queryKey: ['credentialUsageRecords', id, page],
+    queryFn: () => getCredentialUsageRecords(id, page, 50),
+    enabled: id > 0,
+  })
+}
+
+// 查询 API Key 逐条使用日志
+export function useApiKeyUsageRecords(id: number, page: number) {
+  return useQuery({
+    queryKey: ['apiKeyUsageRecords', id, page],
+    queryFn: () => getApiKeyUsageRecords(id, page, 50),
+    enabled: id > 0,
   })
 }

@@ -154,3 +154,21 @@ export interface RpmSnapshot {
   byCredential: Record<string, number>
   byApiKey: Record<string, number>
 }
+
+export interface UsageRecord {
+  apiKeyId: number
+  credentialId: number | null
+  model: string
+  inputTokens: number
+  outputTokens: number
+  estimatedCost: number
+  createdAt: string
+}
+
+export interface UsageRecordsResponse {
+  records: UsageRecord[]
+  total: number
+  page: number
+  pageSize: number
+  totalPages: number
+}
