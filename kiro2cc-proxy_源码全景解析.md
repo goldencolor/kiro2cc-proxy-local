@@ -29,6 +29,7 @@
 - [两种负载均衡模式详解](#两种负载均衡模式详解)
 - [为什么要这样设计？](#为什么要这样设计)
 - [避坑指南](#避坑指南)
+- [使用日志详情功能（新增）](#使用日志详情功能新增)
 
 ---
 
@@ -57,7 +58,8 @@
 - **双协议转换**：Anthropic Messages API ↔ AWS CodeWhisperer Streaming API
 - **多凭据管理**：固定优先级 + Round-Robin 两种负载均衡策略，自动故障转移
 - **双认证模式**：Social OAuth (Kiro) 和 IdC/AWS SSO OIDC 两种 Token 刷新路径
-- **Admin 控制面板**：REST API + 内嵌 Vue SPA 管理凭据、查看 RPM、追踪用量
+- **Admin 控制面板**：REST API + 内嵌 React SPA 管理凭据、查看 RPM、追踪用量、查看逐条请求日志
+- **User 用量面板**：`/user` 路径，API Key 持有者自助查看用量汇总与逐条请求记录
 - **双 AI 流端点**：`/v1/messages`（标准 SSE）和 `/cc/v1/messages`（Claude Code 特供，等待 contextUsageEvent）
 
 ---
@@ -82,19 +84,21 @@ kiro2cc-proxy-local/
   │   │   ├─ machine_id.rs        # 设备指纹生成（SHA256 from refreshToken）
   │   │   ├─ parser/              # AWS Event Stream 二进制帧解码器
   │   │   └─ model/               # Kiro API 数据类型定义
-  │   ├─ admin/                   # Admin REST API（凭据管理、RPM 查询）
+  │   ├─ admin/                   # Admin REST API（凭据管理、RPM 查询、逐条日志）
   │   ├─ admin_ui/                # 内嵌 Admin SPA（rust-embed）
+  │   ├─ user_api/                # User REST API（登录、用量汇总、逐条日志）
+  │   ├─ user_ui/                 # 内嵌 User SPA（rust-embed）
   │   ├─ model/                   # 通用数据模型
   │   │   ├─ config.rs            # Config 结构体，从 config.json 加载
   │   │   ├─ rpm.rs               # 滑动窗口 RPM 追踪器
   │   │   ├─ api_key.rs           # 子 API Key 管理
-  │   │   └─ usage.rs             # 用量/费用追踪
+  │   │   └─ usage.rs             # 用量/费用追踪（含 credential_id 字段与分页查询）
   │   ├─ cache.rs                 # Prompt Cache 模拟（虚报 cache_read_input_tokens）
   │   ├─ token.rs                 # count_tokens 外部 API 适配
   │   ├─ http_client.rs           # reqwest Client 工厂（代理配置、TLS 后端）
   │   └─ common/auth.rs           # API Key 提取与常量时间比较
-  ├─ admin-ui/                    # Vue 3 Admin 面板源码（Vite + Tailwind）
-  ├─ user-ui/                     # Vue 3 User 面板源码
+  ├─ admin-ui/                    # React 18 Admin 面板源码（Vite + Tailwind + shadcn/ui）
+  ├─ user-ui/                     # React 18 User 面板源码（Vite + Tailwind）
   ├─ config.example.json          # 配置文件模板
   └─ Cargo.toml                   # 依赖声明
 ```
@@ -759,3 +763,140 @@ select_next_credential() 返回 None
 - **统计持久化频率**：`kiro_stats.json` 使用 30 秒 debounce，重启时最多丢失 30 秒的 `success_count` 统计，影响 balanced 模式的初始均衡性。如对统计精度有要求，可以缩短 `STATS_SAVE_DEBOUNCE`
 - **Client 缓存键**：`client_cache` 以 `Option<ProxyConfig>` 为键，`ProxyConfig` 需要实现 `Hash + Eq`。目前实现基于 URL 字符串比较，不同协议的相同地址会被正确区分
 - **流式响应的 keepalive**：handlers.rs 中流式响应会定期发送 `: ping` SSE 注释（每 15 秒），防止客户端因长时间无数据而关闭连接。如果上游响应过慢但客户端已超时，ping 会无效——客户端侧需要配置足够长的读超时
+
+---
+
+## 📊 使用日志详情功能（新增）
+
+### 功能概述
+
+在 Admin 面板的「凭据管理」和「API Key 管理」两个 Tab 中，点击卡片上的「日志」按钮可进入独立详情页，查看逐条请求记录（模型、token 消耗、费用、时间）。布局采用左右分栏：左侧固定显示基本信息与汇总统计，右侧展示可分页的请求日志表格（每页 50 条）。
+
+---
+
+### 后端变更
+
+#### 1. `UsageRecord` 新增 `credential_id` 字段
+
+**文件**：`src/model/usage.rs:16`
+
+```rust
+pub struct UsageRecord {
+    pub api_key_id: u32,
+    #[serde(default)]
+    pub credential_id: Option<u64>,  // 新增：实际使用的凭据 ID
+    pub model: String,
+    pub input_tokens: i32,
+    pub output_tokens: i32,
+    pub estimated_cost: f64,
+    pub created_at: DateTime<Utc>,
+}
+```
+
+`#[serde(default)]` 确保旧数据（无此字段）反序列化时自动填 `None`，向后兼容。
+
+#### 2. `UsageTracker` 新增两个分页查询方法
+
+**文件**：`src/model/usage.rs:227`
+
+```rust
+// 按凭据 ID 查询，结果按 created_at 倒序，返回 (records, total)
+pub fn get_records_by_credential(credential_id: u64, page: usize, page_size: usize) -> (Vec<UsageRecord>, usize)
+
+// 按 API Key ID 查询，同上
+pub fn get_records_by_api_key(api_key_id: u32, page: usize, page_size: usize) -> (Vec<UsageRecord>, usize)
+```
+
+两个方法共用相同模式：`page_size == 0` 时提前返回空（防除零），偏移量用 `page.saturating_sub(1) * page_size` 计算（防 page=0 下溢）。
+
+#### 3. 新增两个 Admin API 端点
+
+**文件**：`src/admin/api_keys.rs:172`
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/admin/credentials/{id}/usage` | 凭据逐条日志（分页） |
+| GET | `/api/admin/api-keys/{id}/usage/records` | API Key 逐条日志（分页） |
+
+查询参数：`?page=1&page_size=50`，响应结构：
+
+```json
+{
+  "records": [...],
+  "total": 142,
+  "page": 1,
+  "pageSize": 50,
+  "totalPages": 3
+}
+```
+
+两个 handler 均做了 `page.max(1)` 保护，防止 page=0 导致偏移量计算错误。
+
+#### 4. `credential_id` 写入时机
+
+**文件**：`src/anthropic/handlers.rs`
+
+在 `post_messages` / `post_messages_cc` 中，从请求上下文取出 `pinned_credential_id`，通过 `with_usage_tracking(tracker, api_key_id, credential_id)` 传入 `StreamContext`，最终在流结束时写入 `UsageRecord`。
+
+---
+
+### 前端变更（Admin UI）
+
+#### 共享组件 `UsageLogPage`
+
+**文件**：`admin-ui/src/components/usage-log-page.tsx`
+
+采用 TypeScript 判别联合（discriminated union）props，一个组件同时服务凭据和 API Key 两种模式：
+
+```typescript
+type Props =
+  | { mode: 'credential'; credential: Credential; summary?: UsageSummary; onBack: () => void }
+  | { mode: 'apikey'; apiKey: ApiKey; summary?: UsageSummary; onBack: () => void }
+```
+
+**布局**：左侧 `w-52` 固定宽度（基本信息 + 用量汇总 + 模型分布条形图），右侧 `flex-1` 自适应（请求日志表格 + 分页控件）。
+
+**关键实现细节**：
+- `useEffect(() => { setPage(1) }, [targetId])` — 切换不同凭据/Key 时自动重置到第 1 页
+- 行 key 使用 `` `${r.createdAt}-${r.model}-${r.apiKeyId}` `` 复合键，避免 index key 导致的 React 渲染问题
+- 分页控件在 `totalPages <= 1` 时隐藏
+
+#### 入口触发
+
+- **凭据管理页**（`dashboard.tsx`）：`detailCredentialId` state 控制显示，`useEffect` 监听凭据删除事件自动退出详情页，工具栏在详情页时隐藏
+- **API Key 管理页**（`api-keys-panel.tsx`）：`view: 'list' | 'detail'` state 控制，详情页早返回放在 `filteredKeys` 计算之前，避免空数据闪烁
+
+#### 新增 API 函数与 Hook
+
+**文件**：`admin-ui/src/api/credentials.ts`、`admin-ui/src/hooks/use-credentials.ts`
+
+```typescript
+// API 函数
+getCredentialUsageRecords(id, page, pageSize)  // GET /credentials/{id}/usage
+getApiKeyUsageRecords(id, page, pageSize)       // GET /api-keys/{id}/usage/records
+
+// Hook（PAGE_SIZE = 50）
+useCredentialUsageRecords(id, page)  // queryKey: ['credential-usage-records', id, page]
+useApiKeyUsageRecords(id, page)      // queryKey: ['api-key-usage-records', id, page]
+```
+
+---
+
+### 数据流
+
+```
+用户点击「日志」按钮
+  → App state 切换 view + 设置 selectedId
+  → 渲染 UsageLogPage（mode='credential' 或 'apikey'）
+  → 左侧：从已缓存的 credentials/apiKeys 数据中取基本信息（无额外请求）
+  → 右侧：TanStack Query 调用 GET /api/admin/credentials/{id}/usage?page=1&page_size=50
+  → UsageTracker.get_records_by_credential() 按 created_at 倒序分页
+  → 展示逐条记录表格 + 分页控件
+```
+
+---
+
+### 向后兼容说明
+
+- 旧 `UsageRecord` JSON 数据无 `credential_id` 字段，`#[serde(default)]` 自动填 `None`，查询时正常展示，前端 `credentialId` 列显示「—」
+- 现有 `/api/admin/api-keys/{id}/usage`（汇总接口）保持不变，新增 `/usage/records` 为逐条接口，两者共存
