@@ -189,7 +189,6 @@ impl AdminService {
         req: AddCredentialRequest,
     ) -> Result<AddCredentialResponse, AdminServiceError> {
         // 构建凭据对象
-        let email = req.email.clone();
         let new_cred = KiroCredentials {
             id: None,
             access_token: None,
@@ -220,6 +219,15 @@ impl AdminService {
             .await
             .map_err(|e| self.classify_add_error(e))?;
 
+        // 读取刷新后实际存储的 email（可能由 JWT 自动提取）
+        let actual_email = self
+            .token_manager
+            .snapshot()
+            .entries
+            .into_iter()
+            .find(|e| e.id == credential_id)
+            .and_then(|e| e.email);
+
         // 后台获取订阅等级，避免首次请求时 Free 账号绕过 Opus 模型过滤
         let tm = self.token_manager.clone();
         tokio::spawn(async move {
@@ -232,7 +240,7 @@ impl AdminService {
             success: true,
             message: format!("凭据添加成功，ID: {}", credential_id),
             credential_id,
-            email,
+            email: actual_email,
         })
     }
 

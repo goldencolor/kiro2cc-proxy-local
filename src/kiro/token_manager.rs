@@ -1626,8 +1626,13 @@ impl MultiTokenManager {
         validated_cred.auth_region = new_cred.auth_region;
         validated_cred.api_region = new_cred.api_region;
         validated_cred.machine_id = new_cred.machine_id;
-        validated_cred.email = new_cred.email;
-        validated_cred.nickname = new_cred.nickname;
+        // 优先使用请求中显式传入的值，否则保留 refresh_token 刷新后从 JWT 自动提取的值
+        if new_cred.email.is_some() {
+            validated_cred.email = new_cred.email;
+        }
+        if new_cred.nickname.is_some() {
+            validated_cred.nickname = new_cred.nickname;
+        }
         validated_cred.proxy_url = new_cred.proxy_url;
         validated_cred.proxy_username = new_cred.proxy_username;
         validated_cred.proxy_password = new_cred.proxy_password;
