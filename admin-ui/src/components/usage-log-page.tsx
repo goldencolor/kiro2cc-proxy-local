@@ -42,6 +42,18 @@ function formatTokens(n: number): string {
   return String(n)
 }
 
+// Kiro Pro+ 定价：$19/月 ≈ 1000 credits，换算系数约 52.63
+// 仅为估算值，实际消耗以 Kiro 账户余额为准
+function estimateCredits(costUsd: number): number {
+  return costUsd * (1000 / 19)
+}
+
+function formatCredits(credits: number): string {
+  if (credits >= 1000) return `${(credits / 1000).toFixed(2)}K`
+  if (credits >= 1) return credits.toFixed(2)
+  return credits.toFixed(4)
+}
+
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleString('zh-CN', {
     month: '2-digit', day: '2-digit',
@@ -135,6 +147,10 @@ export function UsageLogPage(props: UsageLogPageProps) {
                 <span className="text-muted-foreground">费用</span>
                 <span className="font-semibold text-orange-600">${(summary?.totalCost ?? 0).toFixed(4)}</span>
               </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Credits(估)</span>
+                <span className="font-semibold text-violet-600">{formatCredits(estimateCredits(summary?.totalCost ?? 0))}</span>
+              </div>
             </CardContent>
           </Card>
 
@@ -188,6 +204,7 @@ export function UsageLogPage(props: UsageLogPageProps) {
                         <th className="text-right px-4 py-2 text-xs text-muted-foreground font-medium">输入</th>
                         <th className="text-right px-4 py-2 text-xs text-muted-foreground font-medium">输出</th>
                         <th className="text-right px-4 py-2 text-xs text-muted-foreground font-medium">费用</th>
+                        <th className="text-right px-4 py-2 text-xs text-muted-foreground font-medium">Credits(估)</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -202,6 +219,7 @@ export function UsageLogPage(props: UsageLogPageProps) {
                           <td className="px-4 py-2 text-right text-xs">{formatTokens(r.inputTokens)}</td>
                           <td className="px-4 py-2 text-right text-xs">{formatTokens(r.outputTokens)}</td>
                           <td className="px-4 py-2 text-right text-xs font-medium text-orange-600">${r.estimatedCost.toFixed(4)}</td>
+                          <td className="px-4 py-2 text-right text-xs font-medium text-violet-600">{formatCredits(estimateCredits(r.estimatedCost))}</td>
                         </tr>
                       ))}
                     </tbody>
