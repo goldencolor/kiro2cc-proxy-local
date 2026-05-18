@@ -329,6 +329,7 @@ export function ApiKeysPanel() {
         mode="apikey"
         apiKey={apiKey}
         summary={usageMap.get(apiKey.id)}
+        credentials={credentialsData?.credentials}
         onBack={() => { setView('list'); setDetailKeyId(null) }}
       />
     )

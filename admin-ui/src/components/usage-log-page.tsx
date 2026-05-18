@@ -10,6 +10,7 @@ interface CredentialUsagePageProps {
   mode: 'credential'
   credential: CredentialStatusItem
   summary?: UsageSummary
+  credentials?: CredentialStatusItem[]
   onBack: () => void
 }
 
@@ -17,6 +18,7 @@ interface ApiKeyUsagePageProps {
   mode: 'apikey'
   apiKey: ApiKeyItem
   summary?: UsageSummary
+  credentials?: CredentialStatusItem[]
   onBack: () => void
 }
 
@@ -42,10 +44,9 @@ function formatTokens(n: number): string {
   return String(n)
 }
 
-// Kiro Pro+ 定价：$19/月 ≈ 1000 credits，换算系数约 52.63
-// 仅为估算值，实际消耗以 Kiro 账户余额为准
+// 实测换算比例：$0.72 = 1 credit
 function estimateCredits(costUsd: number): number {
-  return costUsd * (1000 / 19)
+  return costUsd / 0.72
 }
 
 function formatCredits(credits: number): string {
@@ -107,6 +108,13 @@ export function UsageLogPage(props: UsageLogPageProps) {
   useEffect(() => { setPage(1) }, [targetId])
 
   const summary = props.summary
+  const showCredentialCol = props.mode === 'apikey'
+  const credentialMap = new Map<number, string>(
+    (props.credentials ?? []).map((c) => [
+      c.id,
+      c.nickname || c.email || `#${c.id}`,
+    ])
+  )
 
   return (
     <div className="space-y-4">
@@ -201,6 +209,7 @@ export function UsageLogPage(props: UsageLogPageProps) {
                       <tr className="border-b bg-muted/50">
                         <th className="text-left px-4 py-2 text-xs text-muted-foreground font-medium">时间</th>
                         <th className="text-left px-4 py-2 text-xs text-muted-foreground font-medium">模型</th>
+                        {showCredentialCol && <th className="text-left px-4 py-2 text-xs text-muted-foreground font-medium">凭据</th>}
                         <th className="text-right px-4 py-2 text-xs text-muted-foreground font-medium">输入</th>
                         <th className="text-right px-4 py-2 text-xs text-muted-foreground font-medium">输出</th>
                         <th className="text-right px-4 py-2 text-xs text-muted-foreground font-medium">费用</th>
@@ -216,6 +225,11 @@ export function UsageLogPage(props: UsageLogPageProps) {
                               {r.model.replace('claude-', '').replace(/-\d{8}$/, '')}
                             </Badge>
                           </td>
+                          {showCredentialCol && (
+                            <td className="px-4 py-2 text-xs text-muted-foreground max-w-[120px] truncate">
+                              {r.credentialId != null ? (credentialMap.get(r.credentialId) ?? `#${r.credentialId}`) : '—'}
+                            </td>
+                          )}
                           <td className="px-4 py-2 text-right text-xs">{formatTokens(r.inputTokens)}</td>
                           <td className="px-4 py-2 text-right text-xs">{formatTokens(r.outputTokens)}</td>
                           <td className="px-4 py-2 text-right text-xs font-medium text-orange-600">${r.estimatedCost.toFixed(4)}</td>
@@ -223,6 +237,17 @@ export function UsageLogPage(props: UsageLogPageProps) {
                         </tr>
                       ))}
                     </tbody>
+                    <tfoot>
+                      <tr className="border-t bg-muted/50 font-medium">
+                        <td colSpan={showCredentialCol ? 5 : 4} className="px-4 py-2 text-xs text-muted-foreground">本页合计</td>
+                        <td className="px-4 py-2 text-right text-xs text-orange-600">
+                          ${data.records.reduce((s, r) => s + r.estimatedCost, 0).toFixed(4)}
+                        </td>
+                        <td className="px-4 py-2 text-right text-xs text-violet-600">
+                          {formatCredits(data.records.reduce((s, r) => s + estimateCredits(r.estimatedCost), 0))}
+                        </td>
+                      </tr>
+                    </tfoot>
                   </table>
                   <div className="px-4 pb-4">
                     <Pagination page={page} totalPages={data.totalPages} onChange={setPage} />

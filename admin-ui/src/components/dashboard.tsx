@@ -715,6 +715,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
             <UsageLogPage
               mode="credential"
               credential={detailCredential}
+              credentials={data?.credentials}
               onBack={() => setDetailCredentialId(null)}
             />
           ) : (
