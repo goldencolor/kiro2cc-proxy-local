@@ -162,6 +162,7 @@ export interface UsageRecord {
   inputTokens: number
   outputTokens: number
   estimatedCost: number
+  clientIp?: string
   createdAt: string
 }
 

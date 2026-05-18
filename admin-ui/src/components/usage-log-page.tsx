@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { ArrowLeft, FileText, ChevronLeft, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -62,6 +62,56 @@ function formatDate(iso: string): string {
   })
 }
 
+function isPrivateIp(ip: string): boolean {
+  if (!ip || ip === '::1' || ip === '127.0.0.1') return true
+  if (ip.startsWith('10.') || ip.startsWith('192.168.') || ip.startsWith('fe80')) return true
+  const parts = ip.split('.').map(Number)
+  if (parts.length === 4 && parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true
+  return false
+}
+
+const geoCache = new Map<string, string>()
+
+function useIpGeo(ips: string[]): Map<string, string> {
+  const [geoMap, setGeoMap] = useState<Map<string, string>>(new Map())
+  const pendingRef = useRef<Set<string>>(new Set())
+
+  useEffect(() => {
+    const publicIps = [...new Set(ips)].filter(ip => ip && !isPrivateIp(ip) && !geoCache.has(ip) && !pendingRef.current.has(ip))
+    if (publicIps.length === 0) {
+      const cached = new Map<string, string>()
+      ips.forEach(ip => { if (geoCache.has(ip)) cached.set(ip, geoCache.get(ip)!) })
+      setGeoMap(cached)
+      return
+    }
+    publicIps.forEach(ip => pendingRef.current.add(ip))
+    fetch('http://ip-api.com/batch?fields=status,city,countryCode,query', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(publicIps.map(ip => ({ query: ip }))),
+    })
+      .then(r => r.json())
+      .then((results: Array<{ status: string; city?: string; countryCode?: string; query: string }>) => {
+        results.forEach(r => {
+          pendingRef.current.delete(r.query)
+          if (r.status === 'success' && r.city && r.countryCode) {
+            geoCache.set(r.query, `${r.city}, ${r.countryCode}`)
+          } else {
+            geoCache.set(r.query, '')
+          }
+        })
+        const updated = new Map<string, string>()
+        ips.forEach(ip => { if (geoCache.has(ip)) updated.set(ip, geoCache.get(ip)!) })
+        setGeoMap(updated)
+      })
+      .catch(() => {
+        publicIps.forEach(ip => pendingRef.current.delete(ip))
+      })
+  }, [ips.join(',')])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  return geoMap
+}
+
 function Pagination({ page, totalPages, onChange }: { page: number; totalPages: number; onChange: (p: number) => void }) {
   if (totalPages <= 1) return null
   return (
@@ -115,6 +165,9 @@ export function UsageLogPage(props: UsageLogPageProps) {
       c.nickname || c.email || `#${c.id}`,
     ])
   )
+
+  const pageIps = (data?.records ?? []).map(r => r.clientIp ?? '').filter(Boolean)
+  const geoMap = useIpGeo(pageIps)
 
   return (
     <div className="space-y-4">
@@ -210,6 +263,7 @@ export function UsageLogPage(props: UsageLogPageProps) {
                         <th className="text-left px-4 py-2 text-xs text-muted-foreground font-medium">时间</th>
                         <th className="text-left px-4 py-2 text-xs text-muted-foreground font-medium">模型</th>
                         {showCredentialCol && <th className="text-left px-4 py-2 text-xs text-muted-foreground font-medium">凭据</th>}
+                        <th className="text-left px-4 py-2 text-xs text-muted-foreground font-medium">IP</th>
                         <th className="text-right px-4 py-2 text-xs text-muted-foreground font-medium">输入</th>
                         <th className="text-right px-4 py-2 text-xs text-muted-foreground font-medium">输出</th>
                         <th className="text-right px-4 py-2 text-xs text-muted-foreground font-medium">费用</th>
@@ -230,6 +284,15 @@ export function UsageLogPage(props: UsageLogPageProps) {
                               {r.credentialId != null ? (credentialMap.get(r.credentialId) ?? `#${r.credentialId}`) : '—'}
                             </td>
                           )}
+                          <td className="px-4 py-2 text-xs text-muted-foreground max-w-[140px]">
+                            {!r.clientIp ? '—' : isPrivateIp(r.clientIp) ? (
+                              <span title={r.clientIp}>本地</span>
+                            ) : (
+                              <span title={r.clientIp}>
+                                {geoMap.get(r.clientIp) ? `${r.clientIp} · ${geoMap.get(r.clientIp)}` : r.clientIp}
+                              </span>
+                            )}
+                          </td>
                           <td className="px-4 py-2 text-right text-xs">{formatTokens(r.inputTokens)}</td>
                           <td className="px-4 py-2 text-right text-xs">{formatTokens(r.outputTokens)}</td>
                           <td className="px-4 py-2 text-right text-xs font-medium text-orange-600">${r.estimatedCost.toFixed(4)}</td>
@@ -239,7 +302,7 @@ export function UsageLogPage(props: UsageLogPageProps) {
                     </tbody>
                     <tfoot>
                       <tr className="border-t bg-muted/50 font-medium">
-                        <td colSpan={showCredentialCol ? 5 : 4} className="px-4 py-2 text-xs text-muted-foreground">本页合计</td>
+                        <td colSpan={showCredentialCol ? 6 : 5} className="px-4 py-2 text-xs text-muted-foreground">本页合计</td>
                         <td className="px-4 py-2 text-right text-xs text-orange-600">
                           ${data.records.reduce((s, r) => s + r.estimatedCost, 0).toFixed(4)}
                         </td>

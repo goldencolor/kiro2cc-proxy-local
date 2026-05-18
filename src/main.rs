@@ -9,6 +9,7 @@ mod model;
 pub mod token;
 
 use std::sync::Arc;
+use std::net::SocketAddr;
 
 use clap::Parser;
 use kiro::model::credentials::{CredentialsConfig, KiroCredentials};
@@ -208,5 +209,5 @@ async fn main() {
     }
 
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await.unwrap();
 }

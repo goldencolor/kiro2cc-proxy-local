@@ -10,7 +10,7 @@ use crate::token;
 use axum::{
     Json as JsonExtractor,
     body::Body,
-    extract::State,
+    extract::{ConnectInfo, State},
     http::{StatusCode, header},
     response::{IntoResponse, Json, Response},
     Extension,
@@ -18,6 +18,7 @@ use axum::{
 use bytes::Bytes;
 use futures::{Stream, StreamExt, stream};
 use serde_json::json;
+use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::time::interval;
 use uuid::Uuid;
@@ -387,6 +388,7 @@ pub async fn get_model(
 pub async fn post_messages(
     State(state): State<AppState>,
     identity: Option<Extension<ApiKeyContext>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     JsonExtractor(mut payload): JsonExtractor<MessagesRequest>,
 ) -> Response {
     tracing::info!(
@@ -402,6 +404,8 @@ pub async fn post_messages(
         let api_key_id = identity.as_ref().map(|ext| ext.0.id);
         rpm_tracker.record_request(api_key_id);
     }
+
+    let client_ip = Some(addr.ip().to_string());
 
     // 检查 KiroProvider 是否可用
     let provider = match &state.kiro_provider {
@@ -520,6 +524,7 @@ pub async fn post_messages(
             api_key_id,
             prompt_cache_usage,
             pinned_credential_id,
+            client_ip,
         )
         .await
     } else {
@@ -533,6 +538,7 @@ pub async fn post_messages(
             api_key_id,
             prompt_cache_usage,
             pinned_credential_id,
+            client_ip,
         )
         .await
     }
@@ -549,6 +555,7 @@ async fn handle_stream_request(
     api_key_id: Option<u32>,
     prompt_cache_usage: crate::cache::PromptCacheUsage,
     pinned_credential_id: Option<u64>,
+    client_ip: Option<String>,
 ) -> Response {
     // 调用 Kiro API（支持多凭据故障转移）
     let response = match provider.call_api_stream(request_body, pinned_credential_id).await {
@@ -558,7 +565,7 @@ async fn handle_stream_request(
 
     // 创建流处理上下文
     let mut ctx = StreamContext::new_with_thinking(model, input_tokens, thinking_enabled)
-        .with_usage_tracking(usage_tracker, api_key_id, pinned_credential_id)
+        .with_usage_tracking(usage_tracker, api_key_id, pinned_credential_id, client_ip)
         .with_prompt_cache_usage(prompt_cache_usage);
 
     // 生成初始事件
@@ -690,6 +697,7 @@ async fn handle_non_stream_request(
     api_key_id: Option<u32>,
     prompt_cache_usage: crate::cache::PromptCacheUsage,
     pinned_credential_id: Option<u64>,
+    client_ip: Option<String>,
 ) -> Response {
     // 调用 Kiro API（支持多凭据故障转移）
     let response = match provider.call_api(request_body, pinned_credential_id).await {
@@ -835,7 +843,7 @@ async fn handle_non_stream_request(
 
     // 记录用量（内部使用真实值）
     if let (Some(tracker), Some(key_id)) = (&usage_tracker, api_key_id) {
-        tracker.record(key_id, pinned_credential_id, model.to_string(), final_input_tokens, output_tokens);
+        tracker.record(key_id, pinned_credential_id, model.to_string(), final_input_tokens, output_tokens, client_ip);
     }
 
     // 构建 Anthropic 响应
@@ -929,6 +937,7 @@ pub async fn count_tokens(
 pub async fn post_messages_cc(
     State(state): State<AppState>,
     identity: Option<Extension<ApiKeyContext>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     JsonExtractor(mut payload): JsonExtractor<MessagesRequest>,
 ) -> Response {
     tracing::info!(
@@ -938,6 +947,8 @@ pub async fn post_messages_cc(
         message_count = %payload.messages.len(),
         "Received POST /cc/v1/messages request"
     );
+
+    let client_ip = Some(addr.ip().to_string());
 
     // 检查 KiroProvider 是否可用
     let provider = match &state.kiro_provider {
@@ -1056,6 +1067,7 @@ pub async fn post_messages_cc(
             api_key_id,
             prompt_cache_usage,
             pinned_credential_id,
+            client_ip.clone(),
         )
         .await
     } else {
@@ -1069,6 +1081,7 @@ pub async fn post_messages_cc(
             api_key_id,
             prompt_cache_usage,
             pinned_credential_id,
+            client_ip,
         )
         .await
     }
@@ -1088,6 +1101,7 @@ async fn handle_stream_request_buffered(
     api_key_id: Option<u32>,
     prompt_cache_usage: crate::cache::PromptCacheUsage,
     pinned_credential_id: Option<u64>,
+    client_ip: Option<String>,
 ) -> Response {
     // 调用 Kiro API（支持多凭据故障转移）
     let response = match provider.call_api_stream(request_body, pinned_credential_id).await {
@@ -1097,7 +1111,7 @@ async fn handle_stream_request_buffered(
 
     // 创建缓冲流处理上下文
     let ctx = BufferedStreamContext::new(model, estimated_input_tokens, thinking_enabled)
-        .with_usage_tracking(usage_tracker, api_key_id, pinned_credential_id)
+        .with_usage_tracking(usage_tracker, api_key_id, pinned_credential_id, client_ip)
         .with_prompt_cache_usage(prompt_cache_usage);
 
     // 创建缓冲 SSE 流
