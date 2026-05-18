@@ -255,6 +255,8 @@ export function KamImportDialog({ open, onOpenChange }: KamImportDialogProps) {
             clientId,
             clientSecret,
             machineId: account.machineId?.trim() || undefined,
+            email: account.email?.trim() || undefined,
+            nickname: account.nickname?.trim() || undefined,
           })
 
           addedCredId = addedCred.credentialId
