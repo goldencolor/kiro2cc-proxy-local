@@ -99,6 +99,9 @@ fn calculate_cost(model: &str, input_tokens: i32, output_tokens: i32) -> f64 {
     input_cost + output_cost
 }
 
+/// 每个 API Key 最多保留的日志条数，超出时删除最老的记录
+const MAX_RECORDS_PER_KEY: usize = 10_000;
+
 /// 用量追踪器（线程安全）
 pub struct UsageTracker {
     records: RwLock<Vec<UsageRecord>>,
@@ -154,7 +157,31 @@ impl UsageTracker {
             estimated_cost: cost,
             created_at: Utc::now(),
         };
-        self.records.write().push(record);
+        {
+            let mut records = self.records.write();
+            records.push(record);
+
+            let count = records.iter().filter(|r| r.api_key_id == api_key_id).count();
+            if count > MAX_RECORDS_PER_KEY {
+                let excess = count - MAX_RECORDS_PER_KEY;
+                // 找出该 key 按时间升序排列的索引，取最老的 excess 个删除
+                let mut key_indices: Vec<usize> = records
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, r)| r.api_key_id == api_key_id)
+                    .map(|(i, _)| i)
+                    .collect();
+                key_indices.sort_by_key(|&i| records[i].created_at);
+                let to_remove: std::collections::HashSet<usize> =
+                    key_indices.into_iter().take(excess).collect();
+                let mut idx = 0;
+                records.retain(|_| {
+                    let keep = !to_remove.contains(&idx);
+                    idx += 1;
+                    keep
+                });
+            }
+        }
         if let Err(e) = self.save() {
             tracing::warn!("保存用量记录失败: {}", e);
         }
