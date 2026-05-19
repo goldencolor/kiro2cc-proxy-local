@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { RefreshCw, LogOut, Moon, Sun, Server, Plus, Upload, FileUp, Trash2, RotateCcw, CheckCircle2, Key, Settings } from 'lucide-react'
-const kiroIcon = '/admin/kiro-icon.svg'
+const kiroIcon = '/admin/kiro-icon.png'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { storage } from '@/lib/storage'
