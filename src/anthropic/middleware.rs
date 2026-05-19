@@ -21,6 +21,7 @@ use super::types::ErrorResponse;
 
 /// 已认证的 API Key 上下文（注入到 request extensions）
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct ApiKeyContext {
     /// API Key ID（0 = 主密钥）
     pub id: u32,

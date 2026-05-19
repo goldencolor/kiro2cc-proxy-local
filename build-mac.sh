@@ -42,7 +42,7 @@ log "admin-ui 构建完成 ✓"
 echo ""
 echo "[2/2] 编译 Rust 二进制..."
 log "cargo build --release 开始..."
-cargo build --release
+cargo build --release -v
 log "编译完成 ✓"
 
 echo ""

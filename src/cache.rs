@@ -6,9 +6,11 @@
 use serde::{Deserialize, Serialize};
 
 /// 比例模式默认核心集中半径：峰值前后 5 个百分点。
+#[allow(dead_code)]
 pub const DEFAULT_CACHE_SIMULATION_RATIO_FOCUS_RADIUS: f64 = 0.05;
 
 /// 比例模式默认核心集中概率：至少大部分请求落在核心区间内。
+#[allow(dead_code)]
 pub const DEFAULT_CACHE_SIMULATION_RATIO_FOCUS_PROBABILITY: f64 = 0.8;
 
 /// 固定比例模式的随机比例配置。
@@ -25,6 +27,7 @@ pub struct CacheSimulationRatioConfig {
     pub focus_probability: f64,
 }
 
+#[allow(dead_code)]
 impl CacheSimulationRatioConfig {
     pub fn fixed(ratio: f64) -> Self {
         let ratio = if ratio.is_finite() {

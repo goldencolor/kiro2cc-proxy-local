@@ -124,6 +124,7 @@ pub struct Metadata {
 
 /// Messages 请求体
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct MessagesRequest {
     pub model: String,
     pub max_tokens: i32,
@@ -235,6 +236,7 @@ pub struct Tool {
     pub max_uses: Option<i32>,
 }
 
+#[allow(dead_code)]
 impl Tool {
     /// 检查是否为 WebSearch 工具
     pub fn is_web_search(&self) -> bool {

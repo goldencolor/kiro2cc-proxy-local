@@ -64,6 +64,7 @@ impl ApiKey {
     }
 
     /// 检查 key 是否有效（启用且未过期）
+    #[allow(dead_code)]
     pub fn is_valid(&self) -> bool {
         if !self.enabled {
             return false;
@@ -183,6 +184,7 @@ impl ApiKeyManager {
 
     /// 只读认证：只要 key 存在就放行（不检查过期/禁用/额度）
     /// 用于用户查询用量等只读场景
+    #[allow(dead_code)]
     pub fn authenticate_readonly(&self, key: &str) -> ApiKeyAuthResult {
         let keys = self.keys.read();
         match keys.iter().find(|k| k.key == key) {
@@ -286,6 +288,7 @@ impl ApiKeyManager {
     }
 
     /// 获取文件路径
+    #[allow(dead_code)]
     pub fn file_path(&self) -> &Path {
         &self.file_path
     }

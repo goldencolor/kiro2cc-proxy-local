@@ -38,6 +38,7 @@ const MAX_BODY_SIZE: usize = 200 * 1024 * 1024;
 /// - `kiro_provider`: 可选的 KiroProvider，用于调用上游 API
 
 /// 创建带有 KiroProvider 的 Anthropic API 路由
+#[allow(dead_code)]
 pub fn create_router_with_provider(
     api_key: Arc<RwLock<String>>,
     kiro_provider: Option<KiroProvider>,
