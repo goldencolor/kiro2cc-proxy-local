@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { RefreshCw, LogOut, Moon, Sun, Server, Plus, Upload, FileUp, Trash2, RotateCcw, CheckCircle2, Key, Settings } from 'lucide-react'
 const kiroIcon = '/admin/kiro-icon.png'
 import { useQueryClient } from '@tanstack/react-query'
@@ -19,7 +19,7 @@ import { UsageLogPage } from '@/components/usage-log-page'
 import { useCredentials, useDeleteCredential, useResetFailure, useRpm } from '@/hooks/use-credentials'
 import { getCredentialBalance } from '@/api/credentials'
 import { extractErrorMessage } from '@/lib/utils'
-import type { BalanceResponse } from '@/types/api'
+import type { BalanceResponse, CredentialStatusItem } from '@/types/api'
 
 interface DashboardProps {
   onLogout: () => void
@@ -45,6 +45,8 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const [liveCreditsTotal, setLiveCreditsTotal] = useState<number | null>(null)
   const [liveCreditsQueried, setLiveCreditsQueried] = useState(0)
   const cancelVerifyRef = useRef(false)
+  const prevActiveTabRef = useRef<typeof activeTab | null>(null)
+  const autoRefreshPendingRef = useRef(false)
   const [currentPage, setCurrentPage] = useState(1)
   const itemsPerPage = 12
   const [darkMode, setDarkMode] = useState(() => {
@@ -85,6 +87,91 @@ export function Dashboard({ onLogout }: DashboardProps) {
       setDetailCredentialId(null)
     }
   }, [data, detailCredentialId])
+
+  // 核心余额查询逻辑，silent=true 时不更新进度状态、不弹 toast
+  const queryAllBalances = useCallback(async (credentials: CredentialStatusItem[], silent: boolean) => {
+    const ids = credentials.filter(c => !c.disabled).map(c => c.id)
+    if (ids.length === 0) {
+      if (!silent) toast.error('没有可查询的启用凭据')
+      return
+    }
+
+    if (!silent) {
+      setQueryingInfo(true)
+      setQueryInfoProgress({ current: 0, total: ids.length })
+      setLiveCreditsTotal(0)
+      setLiveCreditsQueried(0)
+    }
+
+    let successCount = 0
+    let failCount = 0
+    let runningTotal = 0
+
+    for (let i = 0; i < ids.length; i++) {
+      const id = ids[i]
+
+      setLoadingBalanceIds(prev => {
+        const next = new Set(prev)
+        next.add(id)
+        return next
+      })
+
+      try {
+        const balance = await getCredentialBalance(id)
+        successCount++
+        runningTotal += balance.remaining
+
+        setBalanceMap(prev => {
+          const next = new Map(prev)
+          next.set(id, balance)
+          return next
+        })
+
+        if (!silent) {
+          setLiveCreditsTotal(runningTotal)
+          setLiveCreditsQueried(i + 1)
+        }
+      } catch {
+        failCount++
+        if (!silent) setLiveCreditsQueried(i + 1)
+      } finally {
+        setLoadingBalanceIds(prev => {
+          const next = new Set(prev)
+          next.delete(id)
+          return next
+        })
+      }
+
+      if (!silent) setQueryInfoProgress({ current: i + 1, total: ids.length })
+    }
+
+    if (!silent) {
+      setQueryingInfo(false)
+      if (failCount === 0) {
+        toast.success(`查询完成：成功 ${successCount}/${ids.length}`)
+      } else {
+        toast.warning(`查询完成：成功 ${successCount} 个，失败 ${failCount} 个`)
+      }
+    }
+  }, [])
+
+  // 切换到凭据管理 tab 时触发静默刷新
+  useEffect(() => {
+    const prev = prevActiveTabRef.current
+    prevActiveTabRef.current = activeTab
+    if (prev !== null && prev !== 'credentials' && activeTab === 'credentials') {
+      refetch()
+      autoRefreshPendingRef.current = true
+    }
+  }, [activeTab])
+
+  // 数据就绪后执行待处理的静默余额刷新
+  useEffect(() => {
+    if (!autoRefreshPendingRef.current) return
+    if (!data?.credentials || data.credentials.length === 0) return
+    autoRefreshPendingRef.current = false
+    queryAllBalances(data.credentials, true)
+  }, [data?.credentials, queryAllBalances])
 
   // 只保留当前仍存在的凭据缓存，避免删除后残留旧数据
   useEffect(() => {
@@ -319,67 +406,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
       return
     }
 
-    const ids = allCredentials
-      .filter(credential => !credential.disabled)
-      .map(credential => credential.id)
-
-    if (ids.length === 0) {
-      toast.error('没有可查询的启用凭据')
-      return
-    }
-
-    setQueryingInfo(true)
-    setQueryInfoProgress({ current: 0, total: ids.length })
-    setLiveCreditsTotal(0)
-    setLiveCreditsQueried(0)
-
-    let successCount = 0
-    let failCount = 0
-    let runningTotal = 0
-
-    for (let i = 0; i < ids.length; i++) {
-      const id = ids[i]
-
-      setLoadingBalanceIds(prev => {
-        const next = new Set(prev)
-        next.add(id)
-        return next
-      })
-
-      try {
-        const balance = await getCredentialBalance(id)
-        successCount++
-        runningTotal += balance.remaining
-
-        setBalanceMap(prev => {
-          const next = new Map(prev)
-          next.set(id, balance)
-          return next
-        })
-
-        setLiveCreditsTotal(runningTotal)
-        setLiveCreditsQueried(i + 1)
-      } catch (error) {
-        failCount++
-        setLiveCreditsQueried(i + 1)
-      } finally {
-        setLoadingBalanceIds(prev => {
-          const next = new Set(prev)
-          next.delete(id)
-          return next
-        })
-      }
-
-      setQueryInfoProgress({ current: i + 1, total: ids.length })
-    }
-
-    setQueryingInfo(false)
-
-    if (failCount === 0) {
-      toast.success(`查询完成：成功 ${successCount}/${ids.length}`)
-    } else {
-      toast.warning(`查询完成：成功 ${successCount} 个，失败 ${failCount} 个`)
-    }
+    await queryAllBalances(allCredentials, false)
   }
 
   // 批量验活
