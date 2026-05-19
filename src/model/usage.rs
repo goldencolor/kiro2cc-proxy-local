@@ -27,6 +27,9 @@ pub struct UsageRecord {
     pub output_tokens: i32,
     /// 估算费用（美元）
     pub estimated_cost: f64,
+    /// 真实 credits 消耗（来自 meteringEvent）
+    #[serde(default)]
+    pub credits: Option<f64>,
     /// 客户端 IP
     #[serde(default)]
     pub client_ip: Option<String>,
@@ -149,6 +152,7 @@ impl UsageTracker {
         model: String,
         input_tokens: i32,
         output_tokens: i32,
+        credits: Option<f64>,
         client_ip: Option<String>,
     ) {
         let cost = calculate_cost(&model, input_tokens, output_tokens);
@@ -159,6 +163,7 @@ impl UsageTracker {
             input_tokens,
             output_tokens,
             estimated_cost: cost,
+            credits,
             client_ip,
             created_at: Utc::now(),
         };

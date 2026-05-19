@@ -44,15 +44,20 @@ function formatTokens(n: number): string {
   return String(n)
 }
 
-// 实测换算比例：$0.72 = 1 credit
+// 实测换算比例：$0.72 = 1 credit（仅在无真实数据时使用）
 function estimateCredits(costUsd: number): number {
   return costUsd / 0.72
 }
 
 function formatCredits(credits: number): string {
   if (credits >= 1000) return `${(credits / 1000).toFixed(2)}K`
-  if (credits >= 1) return credits.toFixed(2)
-  return credits.toFixed(4)
+  if (credits >= 1) return credits.toFixed(4)
+  return credits.toFixed(6)
+}
+
+function getCredits(r: { credits?: number; estimatedCost: number }): { value: number; estimated: boolean } {
+  if (r.credits != null && r.credits > 0) return { value: r.credits, estimated: false }
+  return { value: estimateCredits(r.estimatedCost), estimated: true }
 }
 
 function formatDate(iso: string): string {
@@ -210,7 +215,7 @@ export function UsageLogPage(props: UsageLogPageProps) {
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Credits(估)</span>
-                <span className="font-semibold text-violet-600">{formatCredits(estimateCredits(summary?.totalCost ?? 0))}</span>
+                <span className="font-semibold text-violet-600">{formatCredits(estimateCredits(summary?.totalCost ?? 0))}*</span>
               </div>
             </CardContent>
           </Card>
@@ -267,7 +272,7 @@ export function UsageLogPage(props: UsageLogPageProps) {
                         <th className="text-right px-4 py-2 text-xs text-muted-foreground font-medium">输入</th>
                         <th className="text-right px-4 py-2 text-xs text-muted-foreground font-medium">输出</th>
                         <th className="text-right px-4 py-2 text-xs text-muted-foreground font-medium">费用</th>
-                        <th className="text-right px-4 py-2 text-xs text-muted-foreground font-medium">Credits(估)</th>
+                        <th className="text-right px-4 py-2 text-xs text-muted-foreground font-medium">Credits</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -296,7 +301,9 @@ export function UsageLogPage(props: UsageLogPageProps) {
                           <td className="px-4 py-2 text-right text-xs">{formatTokens(r.inputTokens)}</td>
                           <td className="px-4 py-2 text-right text-xs">{formatTokens(r.outputTokens)}</td>
                           <td className="px-4 py-2 text-right text-xs font-medium text-orange-600">${r.estimatedCost.toFixed(4)}</td>
-                          <td className="px-4 py-2 text-right text-xs font-medium text-violet-600">{formatCredits(estimateCredits(r.estimatedCost))}</td>
+                          <td className="px-4 py-2 text-right text-xs font-medium text-violet-600">
+                            {(() => { const c = getCredits(r); return c.estimated ? `${formatCredits(c.value)}*` : formatCredits(c.value) })()}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -307,7 +314,12 @@ export function UsageLogPage(props: UsageLogPageProps) {
                           ${data.records.reduce((s, r) => s + r.estimatedCost, 0).toFixed(4)}
                         </td>
                         <td className="px-4 py-2 text-right text-xs text-violet-600">
-                          {formatCredits(data.records.reduce((s, r) => s + estimateCredits(r.estimatedCost), 0))}
+                          {(() => {
+                            const realCredits = data.records.reduce((s, r) => r.credits != null && r.credits > 0 ? s + r.credits : s, 0)
+                            const hasReal = data.records.some(r => r.credits != null && r.credits > 0)
+                            const val = hasReal ? realCredits + data.records.filter(r => !r.credits).reduce((s, r) => s + estimateCredits(r.estimatedCost), 0) : data.records.reduce((s, r) => s + estimateCredits(r.estimatedCost), 0)
+                            return hasReal ? formatCredits(val) : `${formatCredits(val)}*`
+                          })()}
                         </td>
                       </tr>
                     </tfoot>

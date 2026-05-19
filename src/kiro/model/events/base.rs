@@ -2,8 +2,18 @@
 //!
 //! 定义事件类型枚举、trait 和统一事件结构
 
+use serde::Deserialize;
+
 use crate::kiro::parser::error::{ParseError, ParseResult};
 use crate::kiro::parser::frame::Frame;
+
+/// 计费事件
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct MeteringEvent {
+    #[serde(default)]
+    pub usage: f64,
+}
 
 /// 事件类型枚举
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -68,7 +78,7 @@ pub enum Event {
     /// 工具使用
     ToolUse(super::ToolUseEvent),
     /// 计费
-    Metering(()),
+    Metering(MeteringEvent),
     /// 上下文使用率
     ContextUsage(super::ContextUsageEvent),
     /// 未知事件 (保留原始帧数据)
@@ -116,7 +126,10 @@ impl Event {
                 let payload = super::ToolUseEvent::from_frame(&frame)?;
                 Ok(Self::ToolUse(payload))
             }
-            EventType::Metering => Ok(Self::Metering(())),
+            EventType::Metering => {
+                let payload: MeteringEvent = frame.payload_as_json().unwrap_or_default();
+                Ok(Self::Metering(payload))
+            }
             EventType::ContextUsage => {
                 let payload = super::ContextUsageEvent::from_frame(&frame)?;
                 Ok(Self::ContextUsage(payload))

@@ -534,6 +534,8 @@ pub struct StreamContext {
     credential_id: Option<u64>,
     /// 客户端 IP（用于用量记录）
     client_ip: Option<String>,
+    /// 真实 credits 消耗（来自 meteringEvent）
+    metering_credits: Option<f64>,
     /// 模拟出的 prompt cache usage
     prompt_cache_usage: PromptCacheUsage,
 }
@@ -564,6 +566,7 @@ impl StreamContext {
             api_key_id: None,
             credential_id: None,
             client_ip: None,
+            metering_credits: None,
             prompt_cache_usage: PromptCacheUsage::uncached(input_tokens),
         }
     }
@@ -656,6 +659,12 @@ impl StreamContext {
         match event {
             Event::AssistantResponse(resp) => self.process_assistant_response(&resp.content),
             Event::ToolUse(tool_use) => self.process_tool_use(tool_use),
+            Event::Metering(m) => {
+                if m.usage > 0.0 {
+                    self.metering_credits = Some(m.usage);
+                }
+                Vec::new()
+            }
             Event::ContextUsage(context_usage) => {
                 // 从上下文使用百分比计算实际的 input_tokens
                 // 公式: percentage * 200000 / 100 = percentage * 2000
@@ -1179,7 +1188,7 @@ impl StreamContext {
 
         // 记录用量（内部记录使用真实值）
         if let (Some(tracker), Some(key_id)) = (&self.usage_tracker, self.api_key_id) {
-            tracker.record(key_id, self.credential_id, self.model.clone(), final_input_tokens, self.output_tokens, self.client_ip.clone());
+            tracker.record(key_id, self.credential_id, self.model.clone(), final_input_tokens, self.output_tokens, self.metering_credits, self.client_ip.clone());
         }
 
         // 注入 signature_delta 事件（伪造模型签名以通过检测）
