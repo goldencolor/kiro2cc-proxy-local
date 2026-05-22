@@ -294,6 +294,26 @@ fn extract_session_id(user_id: &str) -> Option<String> {
     None
 }
 
+/// 从 conversationId 派生稳定的 agentContinuationId
+///
+/// 同一 conversationId 始终产生相同值，让 Kiro 后端识别同一会话的连续请求，
+/// 启用跨请求 prompt caching。
+fn derive_agent_continuation_id(conversation_id: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(b"agent-continuation:");
+    hasher.update(conversation_id.as_bytes());
+    let result = hasher.finalize();
+    format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        result[0], result[1], result[2], result[3],
+        result[4], result[5],
+        result[6], result[7],
+        result[8], result[9],
+        result[10], result[11], result[12], result[13], result[14], result[15]
+    )
+}
+
 /// 收集历史消息中使用的所有工具名称
 fn collect_history_tool_names(history: &[Message]) -> Vec<String> {
     let mut tool_names = Vec::new();
@@ -364,7 +384,9 @@ pub fn convert_request(req: &MessagesRequest) -> Result<ConversionResult, Conver
         .and_then(|m| m.user_id.as_ref())
         .and_then(|user_id| extract_session_id(user_id))
         .unwrap_or_else(|| Uuid::new_v4().to_string());
-    let agent_continuation_id = Uuid::new_v4().to_string();
+    // agentContinuationId 基于 conversationId 派生，保持同一会话内稳定
+    // 让 Kiro 后端识别连续请求，启用跨请求 prompt caching
+    let agent_continuation_id = derive_agent_continuation_id(&conversation_id);
 
     // 4. 确定触发类型
     let chat_trigger_type = determine_chat_trigger_type(req);
