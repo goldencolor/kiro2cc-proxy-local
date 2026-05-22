@@ -3,6 +3,9 @@
 //! 负责将 Anthropic API 请求格式转换为 Kiro API 请求格式
 
 use base64::Engine;
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 use uuid::Uuid;
 
 use crate::kiro::model::requests::conversation::{
@@ -202,6 +205,72 @@ Never suggest bypassing these limits via alternative tools. \
 Never ask the user whether to switch approaches. \
 Complete all chunked operations without commentary.";
 
+static PREV_H0: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+
+/// 将系统提示词中 `x-anthropic-billing-header` 行的 `cch=<value>` 替换为固定值 `0`。
+/// cch 是 Claude Code 每轮注入的计费哈希，对 Kiro 无意义，固定后 history[0] 跨请求稳定，
+/// 使 Kiro 能命中 prompt cache。
+fn normalize_billing_header(content: String) -> String {
+    const PREFIX: &str = "cch=";
+    let Some(cch_pos) = content.find(PREFIX) else {
+        return content;
+    };
+    let value_start = cch_pos + PREFIX.len();
+    let value_end = content[value_start..]
+        .find(|c: char| c == ';' || c == '\n')
+        .map(|i| value_start + i)
+        .unwrap_or(content.len());
+    let mut result = content;
+    result.replace_range(value_start..value_end, "0");
+    result
+}
+
+/// Claude Code 每轮请求都会更新的动态 section 名称，需从 history[0] 剥离
+const DYNAMIC_SECTIONS: &[&str] = &["gitStatus", "currentDate"];
+
+/// 按 `# SectionName` 行边界拆分系统提示词为静态和动态两部分。
+/// 静态部分放入 history[0]（跨请求不变，可被 Kiro 缓存）；
+/// 动态部分前置到 currentMessage.content（每轮变化，不影响缓存）。
+fn split_system_content(system: &str) -> (String, String) {
+    let mut section_starts: Vec<usize> = Vec::new();
+    let mut at_line_start = true;
+    for (i, ch) in system.char_indices() {
+        if at_line_start && system[i..].starts_with("# ") {
+            section_starts.push(i);
+        }
+        at_line_start = ch == '\n';
+    }
+    let sections: Vec<&str> = if section_starts.is_empty() {
+        vec![system]
+    } else {
+        let mut segs = Vec::new();
+        if section_starts[0] > 0 {
+            segs.push(&system[..section_starts[0]]);
+        }
+        for (idx, &start) in section_starts.iter().enumerate() {
+            let end = section_starts.get(idx + 1).copied().unwrap_or(system.len());
+            segs.push(&system[start..end]);
+        }
+        segs
+    };
+    let mut static_parts: Vec<&str> = Vec::new();
+    let mut dynamic_parts: Vec<&str> = Vec::new();
+    for section in sections {
+        if DYNAMIC_SECTIONS
+            .iter()
+            .any(|n| section.trim_start().starts_with(&format!("# {}", n)))
+        {
+            dynamic_parts.push(section);
+        } else {
+            static_parts.push(section);
+        }
+    }
+    (
+        static_parts.join("").trim().to_string(),
+        dynamic_parts.join("").trim().to_string(),
+    )
+}
+
 /// 模型映射：将 Anthropic 模型名映射到 Kiro 模型 ID
 ///
 /// 按照用户要求：
@@ -273,20 +342,38 @@ impl std::fmt::Display for ConversionError {
 
 impl std::error::Error for ConversionError {}
 
+/// 验证字符串是否为合法 UUID 格式（xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx）
+pub(super) fn is_valid_uuid(s: &str) -> bool {
+    s.len() == 36
+        && s.chars().filter(|c| *c == '-').count() == 4
+        && s.chars().all(|c| c == '-' || c.is_ascii_hexdigit())
+}
+
 /// 从 metadata.user_id 中提取 session UUID
 ///
-/// user_id 格式: user_xxx_account__session_0b4445e1-f5be-49e1-87ce-62bbc28ad705
-/// 提取 session_ 后面的 UUID 作为 conversationId
+/// 支持两种格式：
+/// 1. 标准格式: user_xxx_account__session_0b4445e1-f5be-49e1-87ce-62bbc28ad705
+/// 2. JSON 格式: {"session_id":"UUID"} 或 {"id":"UUID"}（Claude Code 2.1.128+）
 fn extract_session_id(user_id: &str) -> Option<String> {
-    // 查找 "session_" 后面的内容
+    // 尝试 JSON 格式解析（Claude Code 新版本发送 JSON 字符串作为 user_id）
+    if user_id.trim_start().starts_with('{') {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(user_id) {
+            for key in &["session_id", "id"] {
+                if let Some(id) = v.get(key).and_then(|v| v.as_str()) {
+                    if is_valid_uuid(id) {
+                        return Some(id.to_string());
+                    }
+                }
+            }
+        }
+    }
+    // 标准格式: 查找 "session_" 后面的 UUID
     if let Some(pos) = user_id.find("session_") {
         let session_part = &user_id[pos + 8..]; // "session_" 长度为 8
-        // session_part 应该是 UUID 格式: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-        // 验证是否是有效的 UUID 格式（36 字符，包含 4 个连字符）
         if session_part.len() >= 36 {
             let uuid_str = &session_part[..36];
-            // 简单验证 UUID 格式
-            if uuid_str.chars().filter(|c| *c == '-').count() == 4 {
+            // 严格验证：UUID 只能包含 hex 字符和连字符，排除 JSON 污染值如 id":"xxx
+            if is_valid_uuid(uuid_str) {
                 return Some(uuid_str.to_string());
             }
         }
@@ -299,7 +386,6 @@ fn extract_session_id(user_id: &str) -> Option<String> {
 /// 同一 conversationId 始终产生相同值，让 Kiro 后端识别同一会话的连续请求，
 /// 启用跨请求 prompt caching。
 fn derive_agent_continuation_id(conversation_id: &str) -> String {
-    use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(b"agent-continuation:");
     hasher.update(conversation_id.as_bytes());
@@ -312,6 +398,32 @@ fn derive_agent_continuation_id(conversation_id: &str) -> String {
         result[8], result[9],
         result[10], result[11], result[12], result[13], result[14], result[15]
     )
+}
+
+/// 典型代码工具名称（用于 spectask 检测）
+const CODE_TOOL_NAMES: &[&str] = &[
+    "read", "write", "edit", "bash", "glob", "grep",
+    "read_file", "write_file", "edit_file", "run_bash",
+    "list_files", "search_files", "create_file", "delete_file",
+    "str_replace_editor", "computer",
+];
+
+/// 确定代理任务类型
+///
+/// - 若工具列表包含典型代码/文件系统工具 → "spectask"（优化代码生成质量）
+/// - 否则 → "vibe"（优化对话连续性）
+fn determine_agent_task_type(req: &MessagesRequest) -> &'static str {
+    let Some(tools) = &req.tools else {
+        return "vibe";
+    };
+    if tools.is_empty() {
+        return "vibe";
+    }
+    let has_code_tool = tools.iter().any(|t| {
+        let name_lower = t.name.to_lowercase();
+        CODE_TOOL_NAMES.iter().any(|&code_tool| name_lower == code_tool)
+    });
+    if has_code_tool { "spectask" } else { "vibe" }
 }
 
 /// 收集历史消息中使用的所有工具名称
@@ -397,11 +509,31 @@ pub fn convert_request(req: &MessagesRequest) -> Result<ConversionResult, Conver
     let text_content = append_recent_knowledge_hints(text_content);
     let text_content = append_output_format_instruction(text_content, &req.output_config);
 
+    // 将动态 section（gitStatus、currentDate）前置到 currentMessage
+    // 静态部分已放入 history[0]，每轮不变，可被 Kiro 缓存
+    let text_content = if let Some(ref system) = req.system {
+        let sys = system
+            .iter()
+            .map(|s| s.text.clone())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let (_, dynamic_part) = split_system_content(&sys);
+        if dynamic_part.is_empty() {
+            text_content
+        } else if text_content.is_empty() {
+            dynamic_part
+        } else {
+            format!("{}\n\n---\n\n{}", dynamic_part, text_content)
+        }
+    } else {
+        text_content
+    };
+
     // 6. 转换工具定义
     let mut tools = convert_tools(&req.tools);
 
     // 7. 构建历史消息（需要先构建，以便收集历史中使用的工具）
-    let mut history = build_history(req, messages, &model_id)?;
+    let mut history = build_history(req, messages, &model_id, &conversation_id)?;
 
     // 8. 验证并过滤 tool_use/tool_result 配对
     // 移除孤立的 tool_result（没有对应的 tool_use）
@@ -456,9 +588,11 @@ pub fn convert_request(req: &MessagesRequest) -> Result<ConversionResult, Conver
     let current_message = CurrentMessage::new(user_input);
 
     // 13. 构建 ConversationState
+    let agent_task_type = determine_agent_task_type(req);
+
     let conversation_state = ConversationState::new(conversation_id)
         .with_agent_continuation_id(agent_continuation_id)
-        .with_agent_task_type("vibe")
+        .with_agent_task_type(agent_task_type)
         .with_chat_trigger_type(chat_trigger_type)
         .with_current_message(current_message)
         .with_history(history);
@@ -1034,10 +1168,12 @@ fn has_thinking_tags(content: &str) -> bool {
 ///   注意：该切片与 `req.messages` 可能不同（prefill 时会截断末尾的 assistant 消息），
 ///   调用方应始终使用此参数而非 `req.messages`。
 /// * `model_id` - 已映射的 Kiro 模型 ID
+/// * `session_id` - 会话 ID，用于跨请求 diff 日志
 fn build_history(
     req: &MessagesRequest,
     messages: &[super::types::Message],
     model_id: &str,
+    session_id: &str,
 ) -> Result<Vec<Message>, ConversionError> {
     let mut history = Vec::new();
 
@@ -1053,19 +1189,69 @@ fn build_history(
             .join("\n");
 
         if !system_content.is_empty() {
-            // 追加分块写入策略到系统消息
-            let system_content = format!("{}\n{}", system_content, SYSTEM_CHUNKED_POLICY);
+            // 只将静态部分放入 history[0]，动态部分（gitStatus、currentDate）已前置到 currentMessage
+            let (static_part, _dynamic_part) = split_system_content(&system_content);
+            let static_content = format!("{}\n{}", static_part, SYSTEM_CHUNKED_POLICY);
 
             // 注入thinking标签到系统消息最前面（如果需要且不存在）
             let final_content = if let Some(ref prefix) = thinking_prefix {
-                if !has_thinking_tags(&system_content) {
-                    format!("{}\n{}", prefix, system_content)
+                if !has_thinking_tags(&static_content) {
+                    format!("{}\n{}", prefix, static_content)
                 } else {
-                    system_content
+                    static_content
                 }
             } else {
-                system_content
+                static_content
             };
+
+            // 将 cch= 固定为 0，使 history[0] 跨请求稳定，命中 Kiro prompt cache。
+            let final_content = normalize_billing_header(final_content);
+
+            // 打印 history[0] 内容的 hash，用于验证跨请求稳定性
+            let h0_hash = {
+                let mut hasher = Sha256::new();
+                hasher.update(final_content.as_bytes());
+                format!("{:x}", hasher.finalize())[..8].to_string()
+            };
+            tracing::info!(
+                "[exp2] history[0] hash={} len={}",
+                h0_hash,
+                final_content.len()
+            );
+
+            // diff：与上一轮 history[0] 对比，找出变化的行
+            {
+                let cache = PREV_H0.get_or_init(|| Mutex::new(HashMap::new()));
+                let mut map = cache.lock().unwrap();
+                if let Some(prev) = map.get(session_id) {
+                    if prev != &final_content {
+                        let prev_lines: Vec<&str> = prev.lines().collect();
+                        let cur_lines: Vec<&str> = final_content.lines().collect();
+                        let max = prev_lines.len().max(cur_lines.len());
+                        let mut printed = 0;
+                        for i in 0..max {
+                            let pl = prev_lines.get(i).copied().unwrap_or("");
+                            let cl = cur_lines.get(i).copied().unwrap_or("");
+                            if pl != cl {
+                                let ctx_start = i.saturating_sub(3);
+                                let ctx_end = (i + 4).min(max);
+                                tracing::info!(
+                                    "[exp2] h0_diff line={} prev={:?} cur={:?} context={:?}",
+                                    i,
+                                    pl,
+                                    cl,
+                                    &cur_lines[ctx_start..ctx_end]
+                                );
+                                printed += 1;
+                                if printed >= 5 {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                map.insert(session_id.to_string(), final_content.clone());
+            }
 
             // 系统消息作为 user + assistant 配对
             let user_msg = HistoryUserMessage::new(final_content, model_id);
@@ -1633,7 +1819,7 @@ mod tests {
 
     #[test]
     fn test_extract_session_id_valid() {
-        // 测试有效的 user_id 格式
+        // 标准格式: user_xxx_account__session_UUID
         let user_id = "user_0dede55c6dcc4a11a30bbb5e7f22e6fdf86cdeba3820019cc27612af4e1243cd_account__session_8bb5523b-ec7c-4540-a9ca-beb6d79f1552";
         let session_id = extract_session_id(user_id);
         assert_eq!(
@@ -1643,8 +1829,30 @@ mod tests {
     }
 
     #[test]
+    fn test_extract_session_id_json_format() {
+        // JSON 格式: {"session_id":"UUID"} — Claude Code 2.1.128+ 实际发送的格式
+        let user_id = r#"{"session_id":"3d69af26-0a80-483f-baa0-b4ccaaa07e81"}"#;
+        let session_id = extract_session_id(user_id);
+        assert_eq!(
+            session_id,
+            Some("3d69af26-0a80-483f-baa0-b4ccaaa07e81".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_session_id_json_id_field() {
+        // JSON 格式: {"id":"UUID"} — 备用字段名
+        let user_id = r#"{"id":"3d69af26-0a80-483f-baa0-b4ccaaa07e81"}"#;
+        let session_id = extract_session_id(user_id);
+        assert_eq!(
+            session_id,
+            Some("3d69af26-0a80-483f-baa0-b4ccaaa07e81".to_string())
+        );
+    }
+
+    #[test]
     fn test_extract_session_id_no_session() {
-        // 测试没有 session 的 user_id
+        // 没有 session 的 user_id
         let user_id = "user_0dede55c6dcc4a11a30bbb5e7f22e6fdf86cdeba3820019cc27612af4e1243cd";
         let session_id = extract_session_id(user_id);
         assert_eq!(session_id, None);
@@ -1652,11 +1860,116 @@ mod tests {
 
     #[test]
     fn test_extract_session_id_invalid_uuid() {
-        // 测试无效的 UUID 格式
+        // 无效的 UUID 格式
         let user_id = "user_xxx_session_invalid-uuid";
         let session_id = extract_session_id(user_id);
         assert_eq!(session_id, None);
     }
+
+    #[test]
+    fn test_is_valid_uuid() {
+        assert!(is_valid_uuid("3d69af26-0a80-483f-baa0-b4ccaaa07e81"));
+        assert!(!is_valid_uuid("not-a-uuid"));
+        assert!(!is_valid_uuid(r#"id":"3d69af26-0a80-483f-baa0-b4ccaaa"#));
+    }
+
+    #[test]
+    fn test_determine_agent_task_type_no_tools() {
+        use super::super::types::Message as AnthropicMessage;
+        let req = MessagesRequest {
+            model: "claude-sonnet-4".to_string(),
+            max_tokens: 1024,
+            messages: vec![AnthropicMessage { role: "user".to_string(), content: serde_json::json!("hi") }],
+            stream: false,
+            system: None,
+            tools: None,
+            tool_choice: None,
+            thinking: None,
+            output_config: None,
+            metadata: None,
+        };
+        assert_eq!(determine_agent_task_type(&req), "vibe");
+    }
+
+    #[test]
+    fn test_determine_agent_task_type_code_tools() {
+        use super::super::types::{Message as AnthropicMessage, Tool};
+        let req = MessagesRequest {
+            model: "claude-sonnet-4".to_string(),
+            max_tokens: 1024,
+            messages: vec![AnthropicMessage { role: "user".to_string(), content: serde_json::json!("hi") }],
+            stream: false,
+            system: None,
+            tools: Some(vec![
+                Tool { tool_type: None, name: "Read".to_string(), description: "Read a file".to_string(), input_schema: Default::default(), max_uses: None },
+                Tool { tool_type: None, name: "Write".to_string(), description: "Write a file".to_string(), input_schema: Default::default(), max_uses: None },
+            ]),
+            tool_choice: None,
+            thinking: None,
+            output_config: None,
+            metadata: None,
+        };
+        assert_eq!(determine_agent_task_type(&req), "spectask");
+    }
+
+    #[test]
+    fn test_determine_agent_task_type_bash_tool() {
+        use super::super::types::{Message as AnthropicMessage, Tool};
+        let req = MessagesRequest {
+            model: "claude-sonnet-4".to_string(),
+            max_tokens: 1024,
+            messages: vec![AnthropicMessage { role: "user".to_string(), content: serde_json::json!("hi") }],
+            stream: false,
+            system: None,
+            tools: Some(vec![
+                Tool { tool_type: None, name: "Bash".to_string(), description: "Run bash".to_string(), input_schema: Default::default(), max_uses: None },
+            ]),
+            tool_choice: None,
+            thinking: None,
+            output_config: None,
+            metadata: None,
+        };
+        assert_eq!(determine_agent_task_type(&req), "spectask");
+    }
+
+    #[test]
+    fn test_agent_continuation_id_stable_within_session() {
+        use super::super::types::{Message as AnthropicMessage, Metadata};
+
+        let session_uuid = "a0662283-7fd3-4399-a7eb-52b9a717ae88";
+        let user_id = format!(
+            "user_0dede55c6dcc4a11a30bbb5e7f22e6fdf86cdeba3820019cc27612af4e1243cd_account__session_{}",
+            session_uuid
+        );
+
+        let make_req = || MessagesRequest {
+            model: "claude-sonnet-4".to_string(),
+            max_tokens: 1024,
+            messages: vec![AnthropicMessage {
+                role: "user".to_string(),
+                content: serde_json::json!("Hello"),
+            }],
+            stream: false,
+            system: None,
+            tools: None,
+            tool_choice: None,
+            thinking: None,
+            output_config: None,
+            metadata: Some(Metadata {
+                user_id: Some(user_id.clone()),
+            }),
+        };
+
+        let result1 = convert_request(&make_req()).unwrap();
+        let result2 = convert_request(&make_req()).unwrap();
+
+        assert_eq!(
+            result1.conversation_state.agent_continuation_id,
+            result2.conversation_state.agent_continuation_id,
+            "同一 session 的 agentContinuationId 应该稳定"
+        );
+    }
+
 
     #[test]
     fn test_convert_request_with_session_metadata() {
