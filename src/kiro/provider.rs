@@ -160,6 +160,15 @@ impl KiroProvider {
             .map(|s| s.to_string())
     }
 
+    /// 提取 conversationState.agentContinuationId，用于 sticky cache 路由
+    fn extract_continuation_id_from_request(request_body: &str) -> Option<String> {
+        let json: serde_json::Value = serde_json::from_str(request_body).ok()?;
+        json.get("conversationState")?
+            .get("agentContinuationId")?
+            .as_str()
+            .map(|s| s.to_string())
+    }
+
     /// 构建请求头
     ///
     /// # Arguments
@@ -310,10 +319,11 @@ impl KiroProvider {
         let max_retries = (total_credentials * MAX_RETRIES_PER_CREDENTIAL).min(MAX_TOTAL_RETRIES);
         let mut last_error: Option<anyhow::Error> = None;
 
+        let continuation_id = Self::extract_continuation_id_from_request(request_body);
+
         for attempt in 0..max_retries {
-            // 获取调用上下文
-            // MCP 调用（WebSearch 等工具）不涉及模型选择，无需按模型过滤凭据
-            let ctx = match self.token_manager.acquire_context(None).await {
+            // 获取调用上下文（MCP 不涉及模型选择，但同样应用 sticky 路由）
+            let ctx = match self.token_manager.acquire_context_sticky(None, continuation_id.as_deref()).await {
                 Ok(c) => c,
                 Err(e) => {
                     last_error = Some(e);
@@ -462,11 +472,12 @@ impl KiroProvider {
         let mut last_error: Option<anyhow::Error> = None;
         let api_type = if is_stream { "流式" } else { "非流式" };
 
-        // 尝试从请求体中提取模型信息
+        // 尝试从请求体中提取模型信息和会话 ID
         let model = Self::extract_model_from_request(request_body);
+        let continuation_id = Self::extract_continuation_id_from_request(request_body);
 
         for attempt in 0..max_retries {
-            // 获取调用上下文（绑定 index、credentials、token）
+            // 获取调用上下文（pinned 优先，否则 sticky 路由）
             let ctx = if let Some(pinned_id) = pinned_credential_id {
                 match self.token_manager.acquire_context_for(pinned_id).await {
                     Ok(c) => c,
@@ -475,7 +486,7 @@ impl KiroProvider {
                     }
                 }
             } else {
-                match self.token_manager.acquire_context(model.as_deref()).await {
+                match self.token_manager.acquire_context_sticky(model.as_deref(), continuation_id.as_deref()).await {
                     Ok(c) => c,
                     Err(e) => {
                         last_error = Some(e);

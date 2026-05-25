@@ -582,12 +582,23 @@ pub struct MultiTokenManager {
     stats_dirty: AtomicBool,
     /// Round-Robin 计数器（balanced 模式下用于均匀轮转凭据）
     rr_counter: AtomicU64,
+    /// Sticky cache：agentContinuationId → 凭据绑定关系
+    sticky_cache: Mutex<HashMap<String, StickyCacheEntry>>,
 }
 
 /// 每个凭据最大 API 调用失败次数
 const MAX_FAILURES_PER_CREDENTIAL: u32 = 3;
 /// 统计数据持久化防抖间隔
 const STATS_SAVE_DEBOUNCE: StdDuration = StdDuration::from_secs(30);
+/// Sticky cache 条目存活时间（60 分钟不活跃后自动淘汰）
+const STICKY_CACHE_TTL: StdDuration = StdDuration::from_secs(60 * 60);
+
+/// Sticky cache 条目：记录会话到凭据的绑定关系
+struct StickyCacheEntry {
+    credential_id: u64,
+    /// 最后一次命中/写入时间，用于 TTL 计算
+    inserted_at: Instant,
+}
 
 /// API 调用上下文
 ///
@@ -693,6 +704,7 @@ impl MultiTokenManager {
             last_stats_save_at: Mutex::new(None),
             stats_dirty: AtomicBool::new(false),
             rr_counter: AtomicU64::new(0),
+            sticky_cache: Mutex::new(HashMap::new()),
         };
 
         // 如果有新分配的 ID 或新生成的 machineId，立即持久化到配置文件
@@ -904,6 +916,76 @@ impl MultiTokenManager {
             entry.credentials.clone()
         };
         self.try_ensure_token(credential_id, &credentials).await
+    }
+
+    /// 基于 agentContinuationId 的 sticky 路由
+    ///
+    /// 同一会话优先路由到缓存中的同一凭据，保证 Kiro prompt cache 命中率。
+    /// 缓存条目 TTL 60 分钟（每次命中续期），凭据被禁用时自动驱逐并重选。
+    pub async fn acquire_context_sticky(
+        &self,
+        model: Option<&str>,
+        continuation_id: Option<&str>,
+    ) -> anyhow::Result<CallContext> {
+        let Some(cid) = continuation_id else {
+            return self.acquire_context(model).await;
+        };
+
+        // 步骤 ①②：从 sticky_cache 查找，验证 TTL + 健康状态
+        let cached = {
+            let cache = self.sticky_cache.lock();
+            if let Some(entry) = cache.get(cid) {
+                if entry.inserted_at.elapsed() < STICKY_CACHE_TTL {
+                    let entries = self.entries.lock();
+                    entries
+                        .iter()
+                        .find(|e| e.id == entry.credential_id && !e.disabled)
+                        .map(|e| (e.id, e.credentials.clone()))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+
+        // 步骤 ③：尝试使用缓存凭据
+        if let Some((id, credentials)) = cached {
+            match self.try_ensure_token(id, &credentials).await {
+                Ok(ctx) => {
+                    // 命中成功，续期
+                    self.sticky_cache.lock().entry(cid.to_string()).and_modify(|e| {
+                        e.inserted_at = Instant::now();
+                    });
+                    return Ok(ctx);
+                }
+                Err(e) => {
+                    tracing::warn!("sticky cache 凭据 #{} token 刷新失败，驱逐并重选: {}", id, e);
+                    self.sticky_cache.lock().remove(cid);
+                }
+            }
+        } else {
+            // TTL 过期或凭据已禁用，清理旧条目
+            self.sticky_cache.lock().remove(cid);
+        }
+
+        // 步骤 ④：走原有选择逻辑
+        let ctx = self.acquire_context(model).await?;
+
+        // 步骤 ⑤⑥：写入 sticky_cache，懒惰 GC
+        {
+            let mut cache = self.sticky_cache.lock();
+            cache.insert(
+                cid.to_string(),
+                StickyCacheEntry {
+                    credential_id: ctx.id,
+                    inserted_at: Instant::now(),
+                },
+            );
+            cache.retain(|_, v| v.inserted_at.elapsed() < STICKY_CACHE_TTL);
+        }
+
+        Ok(ctx)
     }
 
     /// 切换到下一个优先级最高的可用凭据（内部方法）
