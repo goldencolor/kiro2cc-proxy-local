@@ -21,15 +21,6 @@ use crate::model::rpm::RpmTracker;
 use parking_lot::Mutex;
 use tokio::sync::Semaphore;
 
-/// 每个凭据的最大重试次数
-const MAX_RETRIES_PER_CREDENTIAL: usize = 3;
-
-/// 总重试次数硬上限（避免无限重试）
-const MAX_TOTAL_RETRIES: usize = 9;
-
-/// 最大并发请求数（同时发往上游的请求上限）
-const MAX_CONCURRENT_REQUESTS: usize = 50;
-
 /// Kiro API Provider
 ///
 /// 核心组件，负责与 Kiro API 通信
@@ -47,6 +38,8 @@ pub struct KiroProvider {
     concurrency_limit: Arc<Semaphore>,
     /// RPM 追踪器（可选，用于记录凭据维度的 RPM）
     rpm_tracker: Option<Arc<RpmTracker>>,
+    max_retries_per_credential: usize,
+    max_total_retries: usize,
 }
 
 #[allow(dead_code)]
@@ -59,9 +52,12 @@ impl KiroProvider {
     /// 创建带代理配置的 KiroProvider 实例
     pub fn with_proxy(token_manager: Arc<MultiTokenManager>, proxy: Option<ProxyConfig>) -> Self {
         let tls_backend = token_manager.config().tls_backend;
+        let max_concurrent_requests = token_manager.config().max_concurrent_requests;
+        let max_retries_per_credential = token_manager.config().max_retries_per_credential;
+        let max_total_retries = token_manager.config().max_total_retries;
         // 预热：构建全局代理对应的 Client
-        let initial_client = build_client(proxy.as_ref(), 180, tls_backend)
-            .expect("创建 HTTP 客户端失败");
+        let initial_client =
+            build_client(proxy.as_ref(), 180, tls_backend).expect("创建 HTTP 客户端失败");
         let mut cache = HashMap::new();
         cache.insert(proxy.clone(), initial_client);
 
@@ -70,8 +66,10 @@ impl KiroProvider {
             global_proxy: proxy,
             client_cache: Mutex::new(cache),
             tls_backend,
-            concurrency_limit: Arc::new(Semaphore::new(MAX_CONCURRENT_REQUESTS)),
+            concurrency_limit: Arc::new(Semaphore::new(max_concurrent_requests)),
             rpm_tracker: None,
+            max_retries_per_credential,
+            max_total_retries,
         }
     }
 
@@ -100,47 +98,39 @@ impl KiroProvider {
 
     /// 获取 API 基础 URL（使用 config 级 api_region）
     pub fn base_url(&self) -> String {
-        format!(
-            "https://q.{}.amazonaws.com/generateAssistantResponse",
-            self.token_manager.config().effective_api_region()
+        self.token_manager.config().runtime_url(
+            self.token_manager.config().effective_api_region(),
+            "/generateAssistantResponse",
         )
     }
 
     /// 获取 MCP API URL（使用 config 级 api_region）
     pub fn mcp_url(&self) -> String {
-        format!(
-            "https://q.{}.amazonaws.com/mcp",
-            self.token_manager.config().effective_api_region()
-        )
+        self.token_manager
+            .config()
+            .runtime_url(self.token_manager.config().effective_api_region(), "/mcp")
     }
 
     /// 获取 API 基础域名（使用 config 级 api_region）
     pub fn base_domain(&self) -> String {
-        format!("q.{}.amazonaws.com", self.token_manager.config().effective_api_region())
+        self.token_manager
+            .config()
+            .runtime_host(self.token_manager.config().effective_api_region())
     }
 
     /// 获取凭据级 API 基础 URL
     fn base_url_for(&self, credentials: &KiroCredentials) -> String {
-        format!(
-            "https://q.{}.amazonaws.com/generateAssistantResponse",
-            credentials.effective_api_region(self.token_manager.config())
-        )
+        credentials.runtime_url(self.token_manager.config(), "/generateAssistantResponse")
     }
 
     /// 获取凭据级 MCP API URL
     fn mcp_url_for(&self, credentials: &KiroCredentials) -> String {
-        format!(
-            "https://q.{}.amazonaws.com/mcp",
-            credentials.effective_api_region(self.token_manager.config())
-        )
+        credentials.runtime_url(self.token_manager.config(), "/mcp")
     }
 
     /// 获取凭据级 API 基础域名
     fn base_domain_for(&self, credentials: &KiroCredentials) -> String {
-        format!(
-            "q.{}.amazonaws.com",
-            credentials.effective_api_region(self.token_manager.config())
-        )
+        credentials.runtime_host(self.token_manager.config())
     }
 
     /// 从请求体中提取模型信息
@@ -206,7 +196,10 @@ impl KiroProvider {
             reqwest::header::USER_AGENT,
             HeaderValue::from_str(&user_agent).unwrap(),
         );
-        headers.insert(HOST, HeaderValue::from_str(&self.base_domain_for(&ctx.credentials)).unwrap());
+        headers.insert(
+            HOST,
+            HeaderValue::from_str(&self.base_domain_for(&ctx.credentials)).unwrap(),
+        );
         headers.insert(
             "amz-sdk-invocation-id",
             HeaderValue::from_str(&Uuid::new_v4().to_string()).unwrap(),
@@ -215,10 +208,7 @@ impl KiroProvider {
             "amz-sdk-request",
             HeaderValue::from_static("attempt=1; max=3"),
         );
-        headers.insert(
-            AUTHORIZATION,
-            HeaderValue::from_str(&format!("Bearer {}", ctx.token)).unwrap(),
-        );
+        self.insert_auth_header(&mut headers, ctx)?;
         Ok(headers)
     }
 
@@ -249,7 +239,10 @@ impl KiroProvider {
             HeaderValue::from_str(&x_amz_user_agent).unwrap(),
         );
         headers.insert("user-agent", HeaderValue::from_str(&user_agent).unwrap());
-        headers.insert("host", HeaderValue::from_str(&self.base_domain_for(&ctx.credentials)).unwrap());
+        headers.insert(
+            "host",
+            HeaderValue::from_str(&self.base_domain_for(&ctx.credentials)).unwrap(),
+        );
         headers.insert(
             "amz-sdk-invocation-id",
             HeaderValue::from_str(&Uuid::new_v4().to_string()).unwrap(),
@@ -258,11 +251,23 @@ impl KiroProvider {
             "amz-sdk-request",
             HeaderValue::from_static("attempt=1; max=3"),
         );
-        headers.insert(
-            "Authorization",
-            HeaderValue::from_str(&format!("Bearer {}", ctx.token)).unwrap(),
-        );
+        self.insert_auth_header(&mut headers, ctx)?;
         Ok(headers)
+    }
+
+    fn insert_auth_header(&self, headers: &mut HeaderMap, ctx: &CallContext) -> anyhow::Result<()> {
+        if let Some(api_key) = ctx
+            .credentials
+            .effective_kiro_api_key(self.token_manager.config())
+        {
+            headers.insert("x-api-key", HeaderValue::from_str(&api_key)?);
+        } else {
+            headers.insert(
+                AUTHORIZATION,
+                HeaderValue::from_str(&format!("Bearer {}", ctx.token))?,
+            );
+        }
+        Ok(())
     }
 
     /// 发送非流式 API 请求
@@ -278,8 +283,13 @@ impl KiroProvider {
     ///
     /// # Returns
     /// 返回原始的 HTTP Response，不做解析
-    pub async fn call_api(&self, request_body: &str, pinned_credential_id: Option<u64>) -> anyhow::Result<reqwest::Response> {
-        self.call_api_with_retry(request_body, false, pinned_credential_id).await
+    pub async fn call_api(
+        &self,
+        request_body: &str,
+        pinned_credential_id: Option<u64>,
+    ) -> anyhow::Result<reqwest::Response> {
+        self.call_api_with_retry(request_body, false, pinned_credential_id)
+            .await
     }
 
     /// 发送流式 API 请求
@@ -295,8 +305,13 @@ impl KiroProvider {
     ///
     /// # Returns
     /// 返回原始的 HTTP Response，调用方负责处理流式数据
-    pub async fn call_api_stream(&self, request_body: &str, pinned_credential_id: Option<u64>) -> anyhow::Result<reqwest::Response> {
-        self.call_api_with_retry(request_body, true, pinned_credential_id).await
+    pub async fn call_api_stream(
+        &self,
+        request_body: &str,
+        pinned_credential_id: Option<u64>,
+    ) -> anyhow::Result<reqwest::Response> {
+        self.call_api_with_retry(request_body, true, pinned_credential_id)
+            .await
     }
 
     /// 发送 MCP API 请求
@@ -316,14 +331,19 @@ impl KiroProvider {
     async fn call_mcp_with_retry(&self, request_body: &str) -> anyhow::Result<reqwest::Response> {
         let _permit = self.concurrency_limit.acquire().await?;
         let total_credentials = self.token_manager.total_count();
-        let max_retries = (total_credentials * MAX_RETRIES_PER_CREDENTIAL).min(MAX_TOTAL_RETRIES);
+        let max_retries =
+            (total_credentials * self.max_retries_per_credential).min(self.max_total_retries);
         let mut last_error: Option<anyhow::Error> = None;
 
         let continuation_id = Self::extract_continuation_id_from_request(request_body);
 
         for attempt in 0..max_retries {
             // 获取调用上下文（MCP 不涉及模型选择，但同样应用 sticky 路由）
-            let ctx = match self.token_manager.acquire_context_sticky(None, continuation_id.as_deref()).await {
+            let ctx = match self
+                .token_manager
+                .acquire_context_sticky(None, continuation_id.as_deref())
+                .await
+            {
                 Ok(c) => c,
                 Err(e) => {
                     last_error = Some(e);
@@ -468,7 +488,8 @@ impl KiroProvider {
     ) -> anyhow::Result<reqwest::Response> {
         let _permit = self.concurrency_limit.acquire().await?;
         let total_credentials = self.token_manager.total_count();
-        let max_retries = (total_credentials * MAX_RETRIES_PER_CREDENTIAL).min(MAX_TOTAL_RETRIES);
+        let max_retries =
+            (total_credentials * self.max_retries_per_credential).min(self.max_total_retries);
         let mut last_error: Option<anyhow::Error> = None;
         let api_type = if is_stream { "流式" } else { "非流式" };
 
@@ -486,7 +507,11 @@ impl KiroProvider {
                     }
                 }
             } else {
-                match self.token_manager.acquire_context_sticky(model.as_deref(), continuation_id.as_deref()).await {
+                match self
+                    .token_manager
+                    .acquire_context_sticky(model.as_deref(), continuation_id.as_deref())
+                    .await
+                {
                     Ok(c) => c,
                     Err(e) => {
                         last_error = Some(e);

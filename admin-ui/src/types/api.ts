@@ -15,6 +15,7 @@ export interface CredentialStatusItem {
   isCurrent: boolean
   expiresAt: string | null
   authMethod: string | null
+  hasKiroApiKey: boolean
   hasProfileArn: boolean
   email?: string
   nickname?: string
@@ -23,6 +24,8 @@ export interface CredentialStatusItem {
   lastUsedAt: string | null
   hasProxy: boolean
   proxyUrl?: string
+  apiRegion?: string
+  runtimeEndpoint?: string
 }
 
 // 余额响应
@@ -61,7 +64,8 @@ export interface SetPriorityRequest {
 
 // 添加凭据请求
 export interface AddCredentialRequest {
-  refreshToken: string
+  refreshToken?: string
+  kiroApiKey?: string
   email?: string
   nickname?: string
   authMethod?: 'social' | 'idc'
@@ -70,6 +74,8 @@ export interface AddCredentialRequest {
   priority?: number
   authRegion?: string
   apiRegion?: string
+  runtimeEndpoint?: string
+  managementEndpoint?: string
   machineId?: string
   proxyUrl?: string
   proxyUsername?: string
@@ -79,12 +85,15 @@ export interface AddCredentialRequest {
 // 更新凭据请求
 export interface UpdateCredentialRequest {
   refreshToken?: string
+  kiroApiKey?: string
   email?: string
   authMethod?: string
   clientId?: string
   clientSecret?: string
   authRegion?: string
   apiRegion?: string
+  runtimeEndpoint?: string
+  managementEndpoint?: string
   machineId?: string
   proxyUrl?: string
   proxyUsername?: string

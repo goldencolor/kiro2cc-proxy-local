@@ -3,13 +3,14 @@ mod admin_ui;
 mod anthropic;
 mod cache;
 mod common;
+mod health;
 mod http_client;
 mod kiro;
 mod model;
 pub mod token;
 
-use std::sync::Arc;
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use clap::Parser;
 use kiro::model::credentials::{CredentialsConfig, KiroCredentials};
@@ -41,6 +42,10 @@ async fn main() {
         tracing::error!("加载配置失败: {}", e);
         std::process::exit(1);
     });
+    if let Err(e) = config.validate() {
+        tracing::error!("配置校验失败: {}", e);
+        std::process::exit(1);
+    }
 
     // 加载凭证（支持单对象或数组格式）
     let credentials_path = args
@@ -55,7 +60,22 @@ async fn main() {
     let is_multiple_format = credentials_config.is_multiple();
 
     // 转换为按优先级排序的凭据列表
-    let credentials_list = credentials_config.into_sorted_credentials();
+    let mut credentials_list = credentials_config.into_sorted_credentials();
+    if credentials_list.is_empty() && config.effective_kiro_api_key().is_some() {
+        tracing::info!("未加载 credentials.json，使用全局 Kiro API Key 创建无状态凭据");
+        credentials_list.push(KiroCredentials {
+            id: Some(1),
+            kiro_api_key: None,
+            api_region: config.api_region.clone(),
+            ..Default::default()
+        });
+    }
+    if credentials_list.is_empty() {
+        tracing::error!(
+            "未配置任何上游凭据。请提供 credentials.json，或在 config.json / KIRO_API_KEY 中配置上游 Kiro API Key"
+        );
+        std::process::exit(1);
+    }
     tracing::info!("已加载 {} 个凭据配置", credentials_list.len());
 
     // 获取第一个凭据用于日志显示
@@ -70,16 +90,32 @@ async fn main() {
     let api_key_shared = Arc::new(parking_lot::RwLock::new(api_key.clone()));
 
     // 构建代理配置
-    let proxy_config = config.proxy_url.as_ref().map(|url| {
-        let mut proxy = http_client::ProxyConfig::new(url);
-        if let (Some(username), Some(password)) = (&config.proxy_username, &config.proxy_password) {
-            proxy = proxy.with_auth(username, password);
-        }
-        proxy
-    });
+    let proxy_config = config
+        .proxy_url
+        .as_ref()
+        .map(|url| {
+            let mut proxy = http_client::ProxyConfig::new(url);
+            if let (Some(username), Some(password)) =
+                (&config.proxy_username, &config.proxy_password)
+            {
+                proxy = proxy.with_auth(username, password);
+            }
+            proxy
+        })
+        .or_else(|| {
+            if config.use_system_proxy {
+                Some(http_client::ProxyConfig::new("system"))
+            } else {
+                None
+            }
+        });
 
-    if proxy_config.is_some() {
-        tracing::info!("已配置 HTTP 代理: {}", config.proxy_url.as_ref().unwrap());
+    if let Some(proxy) = &proxy_config {
+        if proxy.url.eq_ignore_ascii_case("system") {
+            tracing::info!("已启用系统代理配置");
+        } else {
+            tracing::info!("已配置 HTTP 代理: {}", proxy.url);
+        }
     }
 
     // 创建 MultiTokenManager 和 KiroProvider
@@ -123,18 +159,16 @@ async fn main() {
             .parent()
             .unwrap_or(std::path::Path::new("."));
 
-        let manager = ApiKeyManager::load(data_dir.join("api_keys.json"))
-            .unwrap_or_else(|e| {
-                tracing::error!("加载 API Key 数据失败: {}", e);
-                std::process::exit(1);
-            });
+        let manager = ApiKeyManager::load(data_dir.join("api_keys.json")).unwrap_or_else(|e| {
+            tracing::error!("加载 API Key 数据失败: {}", e);
+            std::process::exit(1);
+        });
         let manager = Arc::new(manager);
 
-        let tracker = UsageTracker::load(data_dir.join("api_key_usage.json"))
-            .unwrap_or_else(|e| {
-                tracing::error!("加载用量数据失败: {}", e);
-                std::process::exit(1);
-            });
+        let tracker = UsageTracker::load(data_dir.join("api_key_usage.json")).unwrap_or_else(|e| {
+            tracing::error!("加载用量数据失败: {}", e);
+            std::process::exit(1);
+        });
         let tracker = Arc::new(tracker);
 
         tracing::info!("API Key 多用户管理已启用");
@@ -189,6 +223,13 @@ async fn main() {
         anthropic_app
     };
 
+    let health_app = health::create_router(health::HealthState {
+        config: config.clone(),
+        token_manager: token_manager.clone(),
+        admin_enabled: admin_key_valid,
+    });
+    let app = app.merge(health_app);
+
     // 启动服务器
     let addr = format!("{}:{}", config.host, config.port);
     tracing::info!("启动 Anthropic API 端点: {}", addr);
@@ -209,5 +250,37 @@ async fn main() {
     }
 
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
-    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await.unwrap();
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await
+    .unwrap();
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install signal handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
+
+    tracing::info!("收到退出信号，正在优雅关闭服务");
 }

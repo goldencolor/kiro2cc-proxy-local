@@ -374,9 +374,24 @@ Lower `priority` value = higher priority. Up to 3 retries per credential, 9 per 
 | `proxyUsername` | No | — | Proxy username |
 | `proxyPassword` | No | — | Proxy password |
 | `tlsBackend` | No | `rustls` | TLS backend: `rustls` or `native-tls` |
+| `useSystemProxy` | No | `true` | Use system proxy environment variables when `proxyUrl` is not configured |
+| `kiroApiKey` | No | — | Upstream Kiro API Key (`ksk_` prefix); can also be set with `KIRO_API_KEY` |
+| `endpointFamily` | No | `legacy-aws` | `legacy-aws` uses `q.<region>.amazonaws.com`; `kiro-dev` uses `runtime/management.<region>.kiro.dev` |
+| `runtimeEndpoint` | No | — | Override runtime API endpoint |
+| `managementEndpoint` | No | — | Override usage/management API endpoint |
 | `loadBalancingMode` | No | `priority` | `priority` (by priority) or `balanced` (round-robin) |
+| `maxConcurrentRequests` | No | `50` | Maximum concurrent upstream requests to Kiro |
+| `maxRetriesPerCredential` | No | `3` | Maximum attempts per credential for one request |
+| `maxTotalRetries` | No | `9` | Total cross-credential attempt limit for one request |
 
 > **TLS note**: If you encounter token refresh failures or request errors, try switching `tlsBackend` to `native-tls`.
+
+### Health checks
+
+- `GET /health`: process liveness, no authentication required.
+- `GET /ready`: readiness, no authentication required; returns `503` with `issues` when no upstream credential is available.
+
+Use `/health` for process liveness and `/ready` for traffic readiness.
 
 Full example:
 

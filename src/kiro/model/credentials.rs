@@ -26,6 +26,10 @@ pub struct KiroCredentials {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub refresh_token: Option<String>,
 
+    /// 上游 Kiro API Key（ksk_ 开头），优先级高于 OAuth accessToken
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kiro_api_key: Option<String>,
+
     /// Profile ARN
     #[serde(skip_serializing_if = "Option::is_none")]
     pub profile_arn: Option<String>,
@@ -63,6 +67,14 @@ pub struct KiroCredentials {
     /// 凭据级 API Region（用于 API 请求）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api_region: Option<String>,
+
+    /// 凭据级 runtime endpoint 覆盖
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_endpoint: Option<String>,
+
+    /// 凭据级 management endpoint 覆盖
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub management_endpoint: Option<String>,
 
     /// 凭据级 Machine ID 配置（可选）
     /// 未配置时回退到 config.json 的 machineId；都未配置时由 refreshToken 派生
@@ -222,6 +234,41 @@ impl KiroCredentials {
             .unwrap_or(config.effective_api_region())
     }
 
+    pub fn effective_kiro_api_key(&self, config: &Config) -> Option<String> {
+        std::env::var("KIRO_API_KEY")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .or_else(|| self.kiro_api_key.clone().filter(|v| !v.trim().is_empty()))
+            .or_else(|| config.effective_kiro_api_key())
+    }
+
+    pub fn uses_kiro_api_key(&self, config: &Config) -> bool {
+        self.effective_kiro_api_key(config).is_some()
+    }
+
+    pub fn runtime_host(&self, config: &Config) -> String {
+        if let Some(endpoint) = &self.runtime_endpoint {
+            return endpoint_host(endpoint).unwrap_or_else(|| endpoint.clone());
+        }
+        config.runtime_host(self.effective_api_region(config))
+    }
+
+    pub fn runtime_url(&self, config: &Config, path: &str) -> String {
+        if let Some(endpoint) = &self.runtime_endpoint {
+            join_endpoint(endpoint, path)
+        } else {
+            config.runtime_url(self.effective_api_region(config), path)
+        }
+    }
+
+    pub fn management_url(&self, config: &Config, path: &str) -> String {
+        if let Some(endpoint) = &self.management_endpoint {
+            join_endpoint(endpoint, path)
+        } else {
+            config.management_url(self.effective_api_region(config), path)
+        }
+    }
+
     /// 获取有效的代理配置
     /// 优先级：凭据代理 > 全局代理 > 无代理
     /// 特殊值 "direct" 表示显式不使用代理（即使全局配置了代理）
@@ -292,6 +339,24 @@ impl KiroCredentials {
     }
 }
 
+fn join_endpoint(endpoint: &str, path: &str) -> String {
+    format!(
+        "{}/{}",
+        endpoint.trim_end_matches('/'),
+        path.trim_start_matches('/')
+    )
+}
+
+fn endpoint_host(endpoint: &str) -> Option<String> {
+    endpoint
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .split('/')
+        .next()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -332,6 +397,7 @@ mod tests {
             id: None,
             access_token: Some("token".to_string()),
             refresh_token: None,
+            kiro_api_key: None,
             profile_arn: None,
             expires_at: None,
             auth_method: Some("social".to_string()),
@@ -341,6 +407,8 @@ mod tests {
             region: None,
             auth_region: None,
             api_region: None,
+            runtime_endpoint: None,
+            management_endpoint: None,
             machine_id: None,
             email: None,
             nickname: None,
@@ -451,6 +519,7 @@ mod tests {
             id: None,
             access_token: None,
             refresh_token: Some("test".to_string()),
+            kiro_api_key: None,
             profile_arn: None,
             expires_at: None,
             auth_method: None,
@@ -460,6 +529,8 @@ mod tests {
             region: Some("eu-west-1".to_string()),
             auth_region: None,
             api_region: None,
+            runtime_endpoint: None,
+            management_endpoint: None,
             machine_id: None,
             email: None,
             nickname: None,
@@ -482,6 +553,7 @@ mod tests {
             id: None,
             access_token: None,
             refresh_token: Some("test".to_string()),
+            kiro_api_key: None,
             profile_arn: None,
             expires_at: None,
             auth_method: None,
@@ -491,6 +563,8 @@ mod tests {
             region: None,
             auth_region: None,
             api_region: None,
+            runtime_endpoint: None,
+            management_endpoint: None,
             machine_id: None,
             email: None,
             nickname: None,
@@ -595,6 +669,7 @@ mod tests {
             id: Some(42),
             access_token: Some("token".to_string()),
             refresh_token: Some("refresh".to_string()),
+            kiro_api_key: None,
             profile_arn: None,
             expires_at: None,
             auth_method: Some("social".to_string()),
@@ -604,6 +679,8 @@ mod tests {
             region: Some("us-west-2".to_string()),
             auth_region: None,
             api_region: None,
+            runtime_endpoint: None,
+            management_endpoint: None,
             machine_id: Some("c".repeat(64)),
             email: None,
             nickname: None,

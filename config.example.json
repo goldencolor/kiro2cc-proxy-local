@@ -2,7 +2,16 @@
   "host": "127.0.0.1",
   "port": 5678,
   "apiKey": "sk-kiro-rs-qazWSXedcRFV123456",
+  "kiroApiKey": null,
   "tlsBackend": "rustls",
+  "useSystemProxy": true,
+  "endpointFamily": "legacy-aws",
+  "runtimeEndpoint": null,
+  "managementEndpoint": null,
   "region": "us-east-1",
+  "loadBalancingMode": "priority",
+  "maxConcurrentRequests": 50,
+  "maxRetriesPerCredential": 3,
+  "maxTotalRetries": 9,
   "adminApiKey": "sk-admin-your-secret-key"
 }

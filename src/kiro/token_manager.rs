@@ -16,10 +16,10 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration as StdDuration, Instant};
 
+use crate::admin::types::UpdateCredentialRequest;
 use crate::http_client::{ProxyConfig, build_client};
 use crate::kiro::machine_id;
 use crate::kiro::model::credentials::KiroCredentials;
-use crate::admin::types::UpdateCredentialRequest;
 use crate::kiro::model::token_refresh::{
     IdcRefreshRequest, IdcRefreshResponse, RefreshRequest, RefreshResponse,
 };
@@ -117,6 +117,13 @@ fn sha256_hex(input: &str) -> String {
 
 /// 验证 refreshToken 的基本有效性
 pub(crate) fn validate_refresh_token(credentials: &KiroCredentials) -> anyhow::Result<()> {
+    if credentials
+        .effective_kiro_api_key(&Config::default())
+        .is_some()
+    {
+        return Ok(());
+    }
+
     let refresh_token = credentials
         .refresh_token
         .as_ref()
@@ -155,7 +162,12 @@ fn extract_email_from_jwt(token: &str) -> Option<String> {
         .ok()?;
     let payload: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
     // 依次尝试常见字段名
-    for key in &["email", "username", "preferred_username", "cognito:username"] {
+    for key in &[
+        "email",
+        "username",
+        "preferred_username",
+        "cognito:username",
+    ] {
         if let Some(v) = payload.get(key).and_then(|v| v.as_str()) {
             if !v.is_empty() {
                 return Some(v.to_string());
@@ -170,6 +182,10 @@ pub(crate) async fn refresh_token(
     config: &Config,
     proxy: Option<&ProxyConfig>,
 ) -> anyhow::Result<KiroCredentials> {
+    if credentials.uses_kiro_api_key(config) {
+        return Ok(credentials.clone());
+    }
+
     validate_refresh_token(credentials)?;
 
     // 根据 auth_method 选择刷新方式
@@ -404,17 +420,15 @@ pub(crate) async fn get_usage_limits(
 ) -> anyhow::Result<UsageLimitsResponse> {
     tracing::debug!("正在获取使用额度信息...");
 
-    // 优先级：凭据.api_region > config.api_region > config.region
-    let region = credentials.effective_api_region(config);
-    let host = format!("q.{}.amazonaws.com", region);
+    let host = credentials.runtime_host(config);
     let machine_id = machine_id::generate_from_credentials(credentials, config)
         .ok_or_else(|| anyhow::anyhow!("无法生成 machineId"))?;
     let kiro_version = &config.kiro_version;
 
     // 构建 URL
-    let mut url = format!(
-        "https://{}/getUsageLimits?origin=AI_EDITOR&resourceType=AGENTIC_REQUEST",
-        host
+    let mut url = credentials.management_url(
+        config,
+        "/getUsageLimits?origin=AI_EDITOR&resourceType=AGENTIC_REQUEST",
     );
 
     // profileArn 是可选的
@@ -435,17 +449,22 @@ pub(crate) async fn get_usage_limits(
 
     let client = build_client(proxy, 60, config.tls_backend)?;
 
-    let response = client
+    let mut request = client
         .get(&url)
         .header("x-amz-user-agent", &amz_user_agent)
         .header("User-Agent", &user_agent)
         .header("host", &host)
         .header("amz-sdk-invocation-id", uuid::Uuid::new_v4().to_string())
         .header("amz-sdk-request", "attempt=1; max=1")
-        .header("Authorization", format!("Bearer {}", token))
-        .header("Connection", "close")
-        .send()
-        .await?;
+        .header("Connection", "close");
+
+    if let Some(api_key) = credentials.effective_kiro_api_key(config) {
+        request = request.header("x-api-key", api_key);
+    } else {
+        request = request.header("Authorization", format!("Bearer {}", token));
+    }
+
+    let response = request.send().await?;
 
     let status = response.status();
     if !status.is_success() {
@@ -522,6 +541,8 @@ pub struct CredentialEntrySnapshot {
     pub failure_count: u32,
     /// 认证方式
     pub auth_method: Option<String>,
+    /// 是否使用上游 Kiro API Key
+    pub has_kiro_api_key: bool,
     /// 是否有 Profile ARN
     pub has_profile_arn: bool,
     /// Token 过期时间
@@ -541,6 +562,10 @@ pub struct CredentialEntrySnapshot {
     /// 代理 URL（用于前端展示）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub proxy_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_region: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_endpoint: Option<String>,
 }
 
 /// 凭据管理器状态快照
@@ -954,13 +979,20 @@ impl MultiTokenManager {
             match self.try_ensure_token(id, &credentials).await {
                 Ok(ctx) => {
                     // 命中成功，续期
-                    self.sticky_cache.lock().entry(cid.to_string()).and_modify(|e| {
-                        e.inserted_at = Instant::now();
-                    });
+                    self.sticky_cache
+                        .lock()
+                        .entry(cid.to_string())
+                        .and_modify(|e| {
+                            e.inserted_at = Instant::now();
+                        });
                     return Ok(ctx);
                 }
                 Err(e) => {
-                    tracing::warn!("sticky cache 凭据 #{} token 刷新失败，驱逐并重选: {}", id, e);
+                    tracing::warn!(
+                        "sticky cache 凭据 #{} token 刷新失败，驱逐并重选: {}",
+                        id,
+                        e
+                    );
                     self.sticky_cache.lock().remove(cid);
                 }
             }
@@ -1096,10 +1128,14 @@ impl MultiTokenManager {
             credentials.clone()
         };
 
-        let token = creds
-            .access_token
-            .clone()
-            .ok_or_else(|| anyhow::anyhow!("没有可用的 accessToken"))?;
+        let token = if creds.uses_kiro_api_key(&self.config) {
+            String::new()
+        } else {
+            creds
+                .access_token
+                .clone()
+                .ok_or_else(|| anyhow::anyhow!("没有可用的 accessToken"))?
+        };
 
         Ok(CallContext {
             id,
@@ -1170,7 +1206,10 @@ impl MultiTokenManager {
         if let Err(e) = write_result {
             let detail = format!(
                 "回写凭据文件失败: path={:?}, credentials_count={}, json_bytes={}, os_error={:?}",
-                path, credentials.len(), json.len(), e
+                path,
+                credentials.len(),
+                json.len(),
+                e
             );
             tracing::error!("{}", detail);
             anyhow::bail!(detail);
@@ -1471,6 +1510,7 @@ impl MultiTokenManager {
                             m.to_string()
                         }
                     }),
+                    has_kiro_api_key: e.credentials.uses_kiro_api_key(&self.config),
                     has_profile_arn: e.credentials.profile_arn.is_some(),
                     expires_at: e.credentials.expires_at.clone(),
                     refresh_token_hash: e.credentials.refresh_token.as_deref().map(sha256_hex),
@@ -1480,6 +1520,8 @@ impl MultiTokenManager {
                     last_used_at: e.last_used_at.clone(),
                     has_proxy: e.credentials.proxy_url.is_some(),
                     proxy_url: e.credentials.proxy_url.clone(),
+                    api_region: e.credentials.api_region.clone(),
+                    runtime_endpoint: e.credentials.runtime_endpoint.clone(),
                 })
                 .collect(),
             current_id,
@@ -1558,6 +1600,12 @@ impl MultiTokenManager {
                 .ok_or_else(|| anyhow::anyhow!("凭据不存在: {}", id))?
         };
 
+        if credentials.uses_kiro_api_key(&self.config) {
+            let effective_proxy = credentials.effective_proxy(self.proxy.as_ref());
+            return get_usage_limits(&credentials, &self.config, "", effective_proxy.as_ref())
+                .await;
+        }
+
         // 检查是否需要刷新 token
         let needs_refresh = is_token_expired(&credentials) || is_token_expiring_soon(&credentials);
 
@@ -1610,7 +1658,8 @@ impl MultiTokenManager {
         };
 
         let effective_proxy = credentials.effective_proxy(self.proxy.as_ref());
-        let usage_limits = get_usage_limits(&credentials, &self.config, &token, effective_proxy.as_ref()).await?;
+        let usage_limits =
+            get_usage_limits(&credentials, &self.config, &token, effective_proxy.as_ref()).await?;
 
         // 更新订阅等级到凭据（仅在发生变化时持久化）
         if let Some(subscription_title) = usage_limits.subscription_title() {
@@ -1619,8 +1668,7 @@ impl MultiTokenManager {
                 if let Some(entry) = entries.iter_mut().find(|e| e.id == id) {
                     let old_title = entry.credentials.subscription_title.clone();
                     if old_title.as_deref() != Some(subscription_title) {
-                        entry.credentials.subscription_title =
-                            Some(subscription_title.to_string());
+                        entry.credentials.subscription_title = Some(subscription_title.to_string());
                         tracing::info!(
                             "凭据 #{} 订阅等级已更新: {:?} -> {}",
                             id,
@@ -1663,26 +1711,42 @@ impl MultiTokenManager {
         // 1. 基本验证
         validate_refresh_token(&new_cred)?;
 
-        // 2. 基于 refreshToken 的 SHA-256 哈希检测重复
-        let new_refresh_token = new_cred
-            .refresh_token
-            .as_deref()
-            .ok_or_else(|| anyhow::anyhow!("缺少 refreshToken"))?;
-        let new_refresh_token_hash = sha256_hex(new_refresh_token);
-        let duplicate_exists = {
-            let entries = self.entries.lock();
-            entries.iter().any(|entry| {
-                entry
-                    .credentials
-                    .refresh_token
-                    .as_deref()
-                    .map(sha256_hex)
-                    .as_deref()
-                    == Some(new_refresh_token_hash.as_str())
-            })
-        };
-        if duplicate_exists {
-            anyhow::bail!("凭据已存在（refreshToken 重复）");
+        // 2. 基于 refreshToken / kiroApiKey 的 SHA-256 哈希检测重复
+        if let Some(new_refresh_token) = new_cred.refresh_token.as_deref() {
+            let new_refresh_token_hash = sha256_hex(new_refresh_token);
+            let duplicate_exists = {
+                let entries = self.entries.lock();
+                entries.iter().any(|entry| {
+                    entry
+                        .credentials
+                        .refresh_token
+                        .as_deref()
+                        .map(sha256_hex)
+                        .as_deref()
+                        == Some(new_refresh_token_hash.as_str())
+                })
+            };
+            if duplicate_exists {
+                anyhow::bail!("凭据已存在（refreshToken 重复）");
+            }
+        }
+        if let Some(new_api_key) = new_cred.kiro_api_key.as_deref() {
+            let new_api_key_hash = sha256_hex(new_api_key);
+            let duplicate_exists = {
+                let entries = self.entries.lock();
+                entries.iter().any(|entry| {
+                    entry
+                        .credentials
+                        .kiro_api_key
+                        .as_deref()
+                        .map(sha256_hex)
+                        .as_deref()
+                        == Some(new_api_key_hash.as_str())
+                })
+            };
+            if duplicate_exists {
+                anyhow::bail!("凭据已存在（kiroApiKey 重复）");
+            }
         }
 
         // 3. 尝试刷新 Token 验证凭据有效性
@@ -1698,6 +1762,7 @@ impl MultiTokenManager {
 
         // 5. 设置 ID 并保留用户输入的元数据
         validated_cred.id = Some(new_id);
+        validated_cred.kiro_api_key = new_cred.kiro_api_key;
         validated_cred.priority = new_cred.priority;
         validated_cred.auth_method = new_cred.auth_method.map(|m| {
             if m.eq_ignore_ascii_case("builder-id") || m.eq_ignore_ascii_case("iam") {
@@ -1711,6 +1776,8 @@ impl MultiTokenManager {
         validated_cred.region = new_cred.region;
         validated_cred.auth_region = new_cred.auth_region;
         validated_cred.api_region = new_cred.api_region;
+        validated_cred.runtime_endpoint = new_cred.runtime_endpoint;
+        validated_cred.management_endpoint = new_cred.management_endpoint;
         validated_cred.machine_id = new_cred.machine_id;
         // 优先使用请求中显式传入的值，否则保留 refresh_token 刷新后从 JWT 自动提取的值
         if new_cred.email.is_some() {
@@ -1744,9 +1811,11 @@ impl MultiTokenManager {
 
         // 7. 持久化（失败不阻塞，凭据已在内存中生效）
         match self.persist_credentials() {
-            Ok(true) => tracing::info!("凭据 #{} 已持久化到文件（共 {} 个凭据）", new_id, {
-                self.entries.lock().len()
-            }),
+            Ok(true) => tracing::info!(
+                "凭据 #{} 已持久化到文件（共 {} 个凭据）",
+                new_id,
+                { self.entries.lock().len() }
+            ),
             Ok(false) => tracing::warn!("凭据 #{} 未持久化（非多凭据格式或路径未设置）", new_id),
             Err(e) => tracing::error!("凭据 #{} 持久化失败: {}", new_id, e),
         }
@@ -1784,6 +1853,13 @@ impl MultiTokenManager {
                 if let Some(ref rt) = update.refresh_token {
                     cred.refresh_token = Some(rt.clone());
                 }
+                if let Some(ref key) = update.kiro_api_key {
+                    cred.kiro_api_key = if key.is_empty() {
+                        None
+                    } else {
+                        Some(key.clone())
+                    };
+                }
                 if let Some(ref am) = update.auth_method {
                     cred.auth_method = Some(am.clone());
                 }
@@ -1794,10 +1870,32 @@ impl MultiTokenManager {
                     cred.client_secret = Some(cs.clone());
                 }
                 if let Some(ref ar) = update.auth_region {
-                    cred.auth_region = if ar.is_empty() { None } else { Some(ar.clone()) };
+                    cred.auth_region = if ar.is_empty() {
+                        None
+                    } else {
+                        Some(ar.clone())
+                    };
                 }
                 if let Some(ref ar) = update.api_region {
-                    cred.api_region = if ar.is_empty() { None } else { Some(ar.clone()) };
+                    cred.api_region = if ar.is_empty() {
+                        None
+                    } else {
+                        Some(ar.clone())
+                    };
+                }
+                if let Some(ref endpoint) = update.runtime_endpoint {
+                    cred.runtime_endpoint = if endpoint.is_empty() {
+                        None
+                    } else {
+                        Some(endpoint.clone())
+                    };
+                }
+                if let Some(ref endpoint) = update.management_endpoint {
+                    cred.management_endpoint = if endpoint.is_empty() {
+                        None
+                    } else {
+                        Some(endpoint.clone())
+                    };
                 }
                 cred
             };
@@ -1817,6 +1915,7 @@ impl MultiTokenManager {
                 if let Some(rt) = validated.refresh_token {
                     entry.credentials.refresh_token = Some(rt);
                 }
+                entry.credentials.kiro_api_key = validated.kiro_api_key;
                 // 应用用户更新的字段
                 Self::apply_update_fields(&mut entry.credentials, &update);
                 // 重置失败计数
@@ -1836,43 +1935,99 @@ impl MultiTokenManager {
     }
 
     /// 将 UpdateCredentialRequest 中的非 None 字段应用到凭据
-    fn apply_update_fields(
-        cred: &mut KiroCredentials,
-        update: &UpdateCredentialRequest,
-    ) {
+    fn apply_update_fields(cred: &mut KiroCredentials, update: &UpdateCredentialRequest) {
         if let Some(ref em) = update.email {
-            cred.email = if em.is_empty() { None } else { Some(em.clone()) };
+            cred.email = if em.is_empty() {
+                None
+            } else {
+                Some(em.clone())
+            };
         }
         if let Some(ref am) = update.auth_method {
-            cred.auth_method = Some(if am.eq_ignore_ascii_case("builder-id") || am.eq_ignore_ascii_case("iam") {
-                "idc".to_string()
-            } else {
-                am.clone()
-            });
+            cred.auth_method = Some(
+                if am.eq_ignore_ascii_case("builder-id") || am.eq_ignore_ascii_case("iam") {
+                    "idc".to_string()
+                } else {
+                    am.clone()
+                },
+            );
         }
         if let Some(ref ci) = update.client_id {
-            cred.client_id = if ci.is_empty() { None } else { Some(ci.clone()) };
+            cred.client_id = if ci.is_empty() {
+                None
+            } else {
+                Some(ci.clone())
+            };
         }
         if let Some(ref cs) = update.client_secret {
-            cred.client_secret = if cs.is_empty() { None } else { Some(cs.clone()) };
+            cred.client_secret = if cs.is_empty() {
+                None
+            } else {
+                Some(cs.clone())
+            };
         }
         if let Some(ref ar) = update.auth_region {
-            cred.auth_region = if ar.is_empty() { None } else { Some(ar.clone()) };
+            cred.auth_region = if ar.is_empty() {
+                None
+            } else {
+                Some(ar.clone())
+            };
         }
         if let Some(ref ar) = update.api_region {
-            cred.api_region = if ar.is_empty() { None } else { Some(ar.clone()) };
+            cred.api_region = if ar.is_empty() {
+                None
+            } else {
+                Some(ar.clone())
+            };
+        }
+        if let Some(ref key) = update.kiro_api_key {
+            cred.kiro_api_key = if key.is_empty() {
+                None
+            } else {
+                Some(key.clone())
+            };
+        }
+        if let Some(ref endpoint) = update.runtime_endpoint {
+            cred.runtime_endpoint = if endpoint.is_empty() {
+                None
+            } else {
+                Some(endpoint.clone())
+            };
+        }
+        if let Some(ref endpoint) = update.management_endpoint {
+            cred.management_endpoint = if endpoint.is_empty() {
+                None
+            } else {
+                Some(endpoint.clone())
+            };
         }
         if let Some(ref mi) = update.machine_id {
-            cred.machine_id = if mi.is_empty() { None } else { Some(mi.clone()) };
+            cred.machine_id = if mi.is_empty() {
+                None
+            } else {
+                Some(mi.clone())
+            };
         }
         if let Some(ref pu) = update.proxy_url {
-            cred.proxy_url = if pu.is_empty() { None } else { Some(pu.clone()) };
+            cred.proxy_url = if pu.is_empty() {
+                None
+            } else {
+                Some(pu.clone())
+            };
         }
         if let Some(ref pu) = update.proxy_username {
-            cred.proxy_username = if pu.is_empty() { None } else { Some(pu.clone()) };
+            cred.proxy_username = if pu.is_empty() {
+                None
+            } else {
+                Some(pu.clone())
+            };
         }
         if let Some(ref pp) = update.proxy_password {
-            cred.proxy_password = if pp.is_empty() { None } else { Some(pp.clone()) };
+            cred.proxy_password = if pp.is_empty() {
+                None
+            } else {
+                Some(pp.clone())
+            };
         }
     }
 
@@ -2212,21 +2367,14 @@ mod tests {
 
     #[test]
     fn test_set_load_balancing_mode_persists_to_config_file() {
-        let config_path = std::env::temp_dir().join(format!(
-            "kiro-load-balancing-{}.json",
-            uuid::Uuid::new_v4()
-        ));
+        let config_path =
+            std::env::temp_dir().join(format!("kiro-load-balancing-{}.json", uuid::Uuid::new_v4()));
         std::fs::write(&config_path, r#"{"loadBalancingMode":"priority"}"#).unwrap();
 
         let config = Config::load(&config_path).unwrap();
-        let manager = MultiTokenManager::new(
-            config,
-            vec![KiroCredentials::default()],
-            None,
-            None,
-            false,
-        )
-        .unwrap();
+        let manager =
+            MultiTokenManager::new(config, vec![KiroCredentials::default()], None, None, false)
+                .unwrap();
 
         manager
             .set_load_balancing_mode("balanced".to_string())
@@ -2300,7 +2448,12 @@ mod tests {
         manager.report_quota_exhausted(2);
         assert_eq!(manager.available_count(), 0);
 
-        let err = manager.acquire_context(None).await.err().unwrap().to_string();
+        let err = manager
+            .acquire_context(None)
+            .await
+            .err()
+            .unwrap()
+            .to_string();
         assert!(
             err.contains("所有凭据均已禁用"),
             "错误应提示所有凭据禁用，实际: {}",

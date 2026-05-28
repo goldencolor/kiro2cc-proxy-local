@@ -36,6 +36,8 @@ pub struct CredentialStatusItem {
     pub expires_at: Option<String>,
     /// 认证方式
     pub auth_method: Option<String>,
+    /// 是否使用上游 Kiro API Key
+    pub has_kiro_api_key: bool,
     /// 是否有 Profile ARN
     pub has_profile_arn: bool,
     /// refreshToken 的 SHA-256 哈希（用于前端重复检测）
@@ -53,6 +55,10 @@ pub struct CredentialStatusItem {
     /// 代理 URL（用于前端展示）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub proxy_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_region: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_endpoint: Option<String>,
 }
 
 // ============ 操作请求 ============
@@ -78,7 +84,11 @@ pub struct SetPriorityRequest {
 #[serde(rename_all = "camelCase")]
 pub struct AddCredentialRequest {
     /// 刷新令牌（必填）
-    pub refresh_token: String,
+    #[serde(default)]
+    pub refresh_token: Option<String>,
+
+    /// 上游 Kiro API Key（ksk_ 开头）
+    pub kiro_api_key: Option<String>,
 
     /// 认证方式（可选，默认 social）
     #[serde(default = "default_auth_method")]
@@ -103,6 +113,12 @@ pub struct AddCredentialRequest {
 
     /// 凭据级 API Region（用于 API 请求）
     pub api_region: Option<String>,
+
+    /// 凭据级 runtime endpoint 覆盖
+    pub runtime_endpoint: Option<String>,
+
+    /// 凭据级 management endpoint 覆盖
+    pub management_endpoint: Option<String>,
 
     /// 凭据级 Machine ID（可选，64 位字符串）
     /// 未配置时回退到 config.json 的 machineId
@@ -148,6 +164,9 @@ pub struct UpdateCredentialRequest {
     /// 刷新令牌（可选，更新后会重新验证）
     pub refresh_token: Option<String>,
 
+    /// 上游 Kiro API Key（空字符串表示清除）
+    pub kiro_api_key: Option<String>,
+
     /// 用户邮箱（可选，用于前端显示）
     pub email: Option<String>,
 
@@ -165,6 +184,12 @@ pub struct UpdateCredentialRequest {
 
     /// 凭据级 API Region（用于 API 请求）
     pub api_region: Option<String>,
+
+    /// 凭据级 runtime endpoint 覆盖
+    pub runtime_endpoint: Option<String>,
+
+    /// 凭据级 management endpoint 覆盖
+    pub management_endpoint: Option<String>,
 
     /// 凭据级 Machine ID（可选）
     pub machine_id: Option<String>,
@@ -296,9 +321,7 @@ where
 
 /// 区分 JSON 中"字段缺失"与"字段为 null"（f64 版本）
 /// 缺失 → None（不更新），null → Some(None)（不限额），有值 → Some(Some(limit))
-fn deserialize_optional_f64<'de, D>(
-    deserializer: D,
-) -> Result<Option<Option<f64>>, D::Error>
+fn deserialize_optional_f64<'de, D>(deserializer: D) -> Result<Option<Option<f64>>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
@@ -307,9 +330,7 @@ where
 
 /// 区分 JSON 中"字段缺失"与"字段为 null"
 /// 缺失 → None（不更新），null → Some(None)（解除绑定），有值 → Some(Some(id))
-fn deserialize_optional_u64<'de, D>(
-    deserializer: D,
-) -> Result<Option<Option<u64>>, D::Error>
+fn deserialize_optional_u64<'de, D>(deserializer: D) -> Result<Option<Option<u64>>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {

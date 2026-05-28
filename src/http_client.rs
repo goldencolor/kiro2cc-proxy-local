@@ -55,11 +55,17 @@ pub fn build_client(
         .pool_idle_timeout(Duration::from_secs(90))
         .tcp_keepalive(Duration::from_secs(30));
 
-    if tls_backend == TlsBackend::Rustls {
-        builder = builder.use_rustls_tls();
-    }
+    builder = match tls_backend {
+        TlsBackend::Rustls => builder.use_rustls_tls(),
+        TlsBackend::NativeTls => builder.use_native_tls(),
+    };
 
     if let Some(proxy_config) = proxy {
+        if proxy_config.url.eq_ignore_ascii_case("system") {
+            tracing::debug!("HTTP Client 使用系统代理配置");
+            return Ok(builder.build()?);
+        }
+
         let mut proxy = Proxy::all(&proxy_config.url)?;
 
         // 设置代理认证
@@ -69,6 +75,8 @@ pub fn build_client(
 
         builder = builder.proxy(proxy);
         tracing::debug!("HTTP Client 使用代理: {}", proxy_config.url);
+    } else {
+        builder = builder.no_proxy();
     }
 
     Ok(builder.build()?)

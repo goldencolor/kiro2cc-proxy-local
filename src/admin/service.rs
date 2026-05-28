@@ -69,6 +69,7 @@ impl AdminService {
                 is_current: entry.id == snapshot.current_id,
                 expires_at: entry.expires_at,
                 auth_method: entry.auth_method,
+                has_kiro_api_key: entry.has_kiro_api_key,
                 has_profile_arn: entry.has_profile_arn,
                 refresh_token_hash: entry.refresh_token_hash,
                 email: entry.email,
@@ -77,6 +78,8 @@ impl AdminService {
                 last_used_at: entry.last_used_at.clone(),
                 has_proxy: entry.has_proxy,
                 proxy_url: entry.proxy_url,
+                api_region: entry.api_region,
+                runtime_endpoint: entry.runtime_endpoint,
             })
             .collect();
 
@@ -192,7 +195,8 @@ impl AdminService {
         let new_cred = KiroCredentials {
             id: None,
             access_token: None,
-            refresh_token: Some(req.refresh_token),
+            refresh_token: req.refresh_token,
+            kiro_api_key: req.kiro_api_key,
             profile_arn: None,
             expires_at: None,
             auth_method: Some(req.auth_method),
@@ -202,6 +206,8 @@ impl AdminService {
             region: req.region,
             auth_region: req.auth_region,
             api_region: req.api_region,
+            runtime_endpoint: req.runtime_endpoint,
+            management_endpoint: req.management_endpoint,
             machine_id: req.machine_id,
             email: req.email,
             nickname: req.nickname,
@@ -440,7 +446,8 @@ impl AdminService {
         let msg = e.to_string();
         if msg.contains("不存在") {
             AdminServiceError::NotFound { id }
-        } else if msg.contains("只能删除已禁用的凭据") || msg.contains("请先禁用凭据") {
+        } else if msg.contains("只能删除已禁用的凭据") || msg.contains("请先禁用凭据")
+        {
             AdminServiceError::InvalidCredential(msg)
         } else {
             AdminServiceError::InternalError(msg)

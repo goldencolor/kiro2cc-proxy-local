@@ -57,6 +57,16 @@ pub fn generate_from_credentials(credentials: &KiroCredentials, config: &Config)
         }
     }
 
+    if let Some(ref kiro_api_key) = credentials.kiro_api_key {
+        if !kiro_api_key.is_empty() {
+            return Some(sha256_hex(&format!("KiroApiKey/{}", kiro_api_key)));
+        }
+    }
+
+    if let Some(kiro_api_key) = config.effective_kiro_api_key() {
+        return Some(sha256_hex(&format!("KiroApiKey/{}", kiro_api_key)));
+    }
+
     // 没有有效的凭证
     None
 }

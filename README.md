@@ -378,9 +378,24 @@ Region [默认: us-east-1]:
 | `proxyUsername` | 否 | — | 代理用户名 |
 | `proxyPassword` | 否 | — | 代理密码 |
 | `tlsBackend` | 否 | `rustls` | TLS 后端：`rustls` 或 `native-tls` |
+| `useSystemProxy` | 否 | `true` | 未配置 `proxyUrl` 时是否读取系统代理环境变量 |
+| `kiroApiKey` | 否 | — | 上游 Kiro API Key（`ksk_` 开头）；也可用环境变量 `KIRO_API_KEY` |
+| `endpointFamily` | 否 | `legacy-aws` | `legacy-aws` 使用 `q.<region>.amazonaws.com`；`kiro-dev` 使用 `runtime/management.<region>.kiro.dev` |
+| `runtimeEndpoint` | 否 | — | 覆盖运行时 API endpoint |
+| `managementEndpoint` | 否 | — | 覆盖额度/管理 API endpoint |
 | `loadBalancingMode` | 否 | `priority` | `priority`（按优先级）或 `balanced`（轮询） |
+| `maxConcurrentRequests` | 否 | `50` | 同时发往 Kiro 上游的最大请求数 |
+| `maxRetriesPerCredential` | 否 | `3` | 单次请求中每个凭据的最大尝试次数 |
+| `maxTotalRetries` | 否 | `9` | 单次请求跨凭据的总尝试上限 |
 
 > **TLS 说明**：如遇到 Token 刷新失败或请求报错，尝试将 `tlsBackend` 改为 `native-tls`。
+
+### 健康检查
+
+- `GET /health`：进程存活检查，无需认证。
+- `GET /ready`：就绪检查，无需认证；当没有可用上游凭据时返回 `503` 并给出 `issues`。
+
+建议部署监控使用 `/health` 判断进程是否存活，使用 `/ready` 判断是否可以接流量。
 
 完整配置示例：
 
