@@ -1,6 +1,5 @@
 #!/bin/bash
-# kiro-rs 一键构建脚本
-# 依次构建 admin-ui 前端，再编译 Rust 二进制
+# Build script for macOS
 
 set -eo pipefail
 
@@ -11,43 +10,40 @@ log() { echo "[$(date '+%H:%M:%S')] $*"; }
 cd "$(dirname "$0")"
 
 echo "=================================================="
-echo "  kiro-rs 构建脚本"
+echo "  kiro2cc-proxy build script"
 echo "=================================================="
 
-# 检测 npm
 if ! command -v npm &>/dev/null; then
-    echo "[!] 未找到 npm，请先安装 Node.js"
+    echo "[!] npm not found. Install Node.js first."
     echo "    brew install node"
     exit 1
 fi
 
-# 检测 cargo
 if ! command -v cargo &>/dev/null; then
-    echo "[!] 未找到 cargo，请先安装 Rust"
+    echo "[!] cargo not found. Install Rust first."
     echo "    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
     exit 1
 fi
 
 echo ""
-echo "[1/2] 构建 admin-ui..."
+echo "[1/2] Building admin-ui..."
 cd admin-ui
-log "npm install 开始 (registry: $NPM_REGISTRY)"
+log "npm install start (registry: $NPM_REGISTRY)"
 npm install --registry "$NPM_REGISTRY" --progress
-log "npm install 完成，开始 build..."
+log "npm install done, building..."
 npm run build
 cd ..
-log "admin-ui 构建完成 ✓"
-
+log "admin-ui build complete"
 
 echo ""
-echo "[2/2] 编译 Rust 二进制..."
-log "cargo build --release 开始..."
+echo "[2/2] Compiling Rust binary..."
+log "cargo build --release start"
 cargo build --release -v
-log "编译完成 ✓"
+log "build complete"
 
 echo ""
 echo "=================================================="
-echo "  构建成功！"
-echo "  二进制位置: ./target/release/kiro-rs"
-echo "  运行: ./run-local-service-mac.command"
+echo "  Build succeeded"
+echo "  Binary: ./target/release/kiro2cc-proxy"
+echo "  Run: ./run-local-service-mac.sh"
 echo "=================================================="

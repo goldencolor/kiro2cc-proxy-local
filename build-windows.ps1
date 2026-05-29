@@ -1,6 +1,5 @@
-# kiro2cc-proxy Windows 一键构建脚本
-# 依次构建 admin-ui 前端，再编译 Rust 二进制
-# 用法: .\build-windows.ps1
+# kiro2cc-proxy Windows build script
+# Builds admin-ui first, then compiles the Rust binary.
 
 $ErrorActionPreference = "Stop"
 $NPM_REGISTRY = "https://registry.npmmirror.com"
@@ -9,40 +8,37 @@ $SCRIPT_DIR = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $SCRIPT_DIR
 
 Write-Host "=================================================="
-Write-Host "  kiro2cc-proxy 构建脚本 (Windows)"
+Write-Host "  kiro2cc-proxy build script (Windows)"
 Write-Host "=================================================="
 
-# 检测 npm
 if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
-    Write-Host "[!] 未找到 npm，请先安装 Node.js: https://nodejs.org"
-    Read-Host "按回车退出"
+    Write-Host "[!] npm not found. Install Node.js first: https://nodejs.org"
+    Read-Host "Press Enter to exit"
     exit 1
 }
 
-# 检测 cargo
 if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
-    Write-Host "[!] 未找到 cargo，请先安装 Rust: https://rustup.rs"
-    Read-Host "按回车退出"
+    Write-Host "[!] cargo not found. Install Rust first: https://rustup.rs"
+    Read-Host "Press Enter to exit"
     exit 1
 }
 
 Write-Host ""
-Write-Host "[1/2] 构建 admin-ui..."
+Write-Host "[1/2] Building admin-ui..."
 Set-Location "$SCRIPT_DIR\admin-ui"
 npm install --registry $NPM_REGISTRY --progress
 npm run build
 Set-Location $SCRIPT_DIR
-Write-Host "[*] admin-ui 构建完成 ✓"
-
+Write-Host "[*] admin-ui build complete"
 
 Write-Host ""
-Write-Host "[2/2] 编译 Rust 二进制..."
+Write-Host "[2/2] Compiling Rust binary..."
 cargo build --release
-Write-Host "[*] 编译完成 ✓"
+Write-Host "[*] Build complete"
 
 Write-Host ""
 Write-Host "=================================================="
-Write-Host "  构建成功！"
-Write-Host "  二进制位置: .\target\release\kiro2cc-proxy.exe"
-Write-Host "  运行: .\run-local-service-windows.ps1"
+Write-Host "  Build succeeded"
+Write-Host "  Binary: .\target\release\kiro2cc-proxy.exe"
+Write-Host "  Run: .\run-local-service-windows.ps1"
 Write-Host "=================================================="
