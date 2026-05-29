@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import {
   useLoadBalancingMode, useSetLoadBalancingMode,
   useAuthKeys, useSetAuthKeys,
+  useKvCacheConfig, useSetKvCacheConfig,
 } from '@/hooks/use-credentials'
 import { extractErrorMessage } from '@/lib/utils'
 
@@ -14,10 +15,16 @@ export function SettingsPanel() {
   const { mutate: setLoadBalancingMode, isPending: isSettingMode } = useSetLoadBalancingMode()
   const { data: authKeysData, isLoading: isLoadingAuthKeys } = useAuthKeys()
   const { mutate: setAuthKeysMut, isPending: isSettingAuthKeys } = useSetAuthKeys()
+  const { data: kvCacheConfig } = useKvCacheConfig()
+  const { mutate: setKvCacheConfig, isPending: isSettingKvCache } = useSetKvCacheConfig()
   const [apiKeyDraft, setApiKeyDraft] = useState('')
   const [adminApiKeyDraft, setAdminApiKeyDraft] = useState('')
   const [editingApiKey, setEditingApiKey] = useState(false)
   const [editingAdminApiKey, setEditingAdminApiKey] = useState(false)
+  const [cacheEfficiencyDraft, setCacheEfficiencyDraft] = useState<number | null>(null)
+  const [cacheTtlDraft, setCacheTtlDraft] = useState<number | null>(null)
+  const cacheEfficiency = cacheEfficiencyDraft ?? Math.round((kvCacheConfig?.cacheReadEfficiency ?? 0.87) * 100)
+  const cacheTtl = cacheTtlDraft ?? kvCacheConfig?.kvCacheTtlSecs ?? 3600
 
   return (
     <div className="space-y-6">
@@ -157,6 +164,61 @@ export function SettingsPanel() {
                 {isLoadingMode ? '加载中...' : loadBalancingData?.mode === 'priority' ? '优先级模式' : '均衡负载'}
               </Button>
             </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">KV Cache</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">缓存效率</span>
+                <span className="text-sm font-semibold tabular-nums">{cacheEfficiency}%</span>
+              </div>
+              <input
+                type="range"
+                min="50"
+                max="100"
+                step="1"
+                value={cacheEfficiency}
+                onChange={(e) => setCacheEfficiencyDraft(parseInt(e.target.value, 10))}
+                className="h-2 w-full cursor-pointer appearance-none rounded-lg bg-secondary accent-primary"
+              />
+            </div>
+            <div className="space-y-2">
+              <span className="text-sm font-medium">缓存 TTL</span>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min="60"
+                  step="60"
+                  value={cacheTtl}
+                  onChange={(e) => setCacheTtlDraft(parseInt(e.target.value, 10) || 3600)}
+                  className="text-sm"
+                />
+                <span className="whitespace-nowrap text-sm text-muted-foreground">秒</span>
+              </div>
+            </div>
+            <Button
+              size="sm"
+              disabled={isSettingKvCache}
+              onClick={() => {
+                setKvCacheConfig({
+                  cacheReadEfficiency: cacheEfficiency / 100,
+                  kvCacheTtlSecs: Math.max(60, cacheTtl),
+                }, {
+                  onSuccess: () => {
+                    toast.success('KV Cache 配置已保存')
+                    setCacheEfficiencyDraft(null)
+                    setCacheTtlDraft(null)
+                  },
+                  onError: (e) => toast.error(extractErrorMessage(e)),
+                })
+              }}
+            >
+              {isSettingKvCache ? '保存中...' : '保存 KV Cache'}
+            </Button>
           </CardContent>
         </Card>
       </div>

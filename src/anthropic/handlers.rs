@@ -2,18 +2,17 @@
 
 use std::convert::Infallible;
 
-use anyhow::Error;
 use crate::kiro::model::events::Event;
 use crate::kiro::model::requests::kiro::KiroRequest;
 use crate::kiro::parser::decoder::EventStreamDecoder;
 use crate::token;
+use anyhow::Error;
 use axum::{
-    Json as JsonExtractor,
+    Extension, Json as JsonExtractor,
     body::Body,
     extract::{ConnectInfo, State},
     http::{StatusCode, header},
     response::{IntoResponse, Json, Response},
-    Extension,
 };
 use bytes::Bytes;
 use futures::{Stream, StreamExt, stream};
@@ -24,10 +23,51 @@ use tokio::time::interval;
 use uuid::Uuid;
 
 use super::converter::{ConversionError, convert_request};
-use super::middleware::{AppState, ApiKeyContext};
+use super::failure_prompt_log;
+use super::kv_cache::{
+    KvCacheRecordInput, build_prompt_hashes, estimate_prompt_block_tokens,
+    record_simulated_kv_cache,
+};
+use super::middleware::{ApiKeyContext, AppState};
 use super::stream::{BufferedStreamContext, SseEvent, StreamContext};
-use super::types::{CountTokensRequest, CountTokensResponse, ErrorResponse, MessagesRequest, Model, ModelsResponse, OutputConfig, Thinking};
+use super::types::{
+    CountTokensRequest, CountTokensResponse, ErrorResponse, MessagesRequest, Model, ModelsResponse,
+    OutputConfig, Thinking,
+};
 use super::websearch;
+
+fn build_kv_prompt_cache_usage(
+    endpoint: &'static str,
+    payload: &MessagesRequest,
+    input_tokens: i32,
+) -> crate::cache::PromptCacheUsage {
+    let prompt_hashes = build_prompt_hashes(&payload.system, &payload.messages, &payload.tools);
+    let block_tokens = estimate_prompt_block_tokens(&payload.system, &payload.messages, &payload.tools);
+    let kv = record_simulated_kv_cache(
+        None,
+        KvCacheRecordInput {
+            endpoint,
+            model: payload.model.clone(),
+            stream: payload.stream,
+            prompt_hashes,
+            block_tokens,
+            input_tokens,
+            output_tokens: 0,
+            credits_used: 0.0,
+            special_settings: Vec::new(),
+        },
+    );
+
+    let cache_creation = kv.cache_creation_input_tokens.max(0);
+    let cache_read = kv.cache_read_input_tokens.max(0);
+    crate::cache::PromptCacheUsage {
+        input_tokens: input_tokens
+            .saturating_sub(cache_creation)
+            .saturating_sub(cache_read),
+        cache_creation_input_tokens: cache_creation,
+        cache_read_input_tokens: cache_read,
+    }
+}
 
 /// GET /v1/ping
 ///
@@ -61,8 +101,22 @@ pub async fn ping(request: axum::http::Request<Body>) -> impl IntoResponse {
     }))
 }
 
-fn map_provider_error_with_context(err: Error, model: &str, estimated_input_tokens: i32) -> Response {
+fn map_provider_error_with_context(
+    err: Error,
+    endpoint: &'static str,
+    model: &str,
+    request_body: &str,
+    estimated_input_tokens: i32,
+) -> Response {
     let err_str = err.to_string();
+    failure_prompt_log::maybe_record_failure_prompt(
+        None,
+        endpoint,
+        model,
+        request_body,
+        "provider_error",
+        &err_str,
+    );
 
     // 上下文窗口满了（对话历史累积超出模型上下文窗口限制）
     if err_str.contains("CONTENT_LENGTH_EXCEEDS_THRESHOLD") {
@@ -260,13 +314,31 @@ fn build_model_list() -> Vec<Model> {
             max_tokens: 32000,
         },
         Model {
+            id: "claude-opus-4-8".to_string(),
+            object: "model".to_string(),
+            created: 1779897600,
+            owned_by: "anthropic".to_string(),
+            display_name: "Claude Opus 4.8".to_string(),
+            model_type: "chat".to_string(),
+            max_tokens: 128_000,
+        },
+        Model {
+            id: "claude-opus-4-8-thinking".to_string(),
+            object: "model".to_string(),
+            created: 1779897600,
+            owned_by: "anthropic".to_string(),
+            display_name: "Claude Opus 4.8 (Thinking)".to_string(),
+            model_type: "chat".to_string(),
+            max_tokens: 128_000,
+        },
+        Model {
             id: "claude-opus-4-7".to_string(),
             object: "model".to_string(),
             created: 1773000000,
             owned_by: "anthropic".to_string(),
             display_name: "Claude Opus 4.7".to_string(),
             model_type: "chat".to_string(),
-            max_tokens: 32000,
+            max_tokens: 64000,
         },
         Model {
             id: "claude-opus-4-7-thinking".to_string(),
@@ -275,7 +347,7 @@ fn build_model_list() -> Vec<Model> {
             owned_by: "anthropic".to_string(),
             display_name: "Claude Opus 4.7 (Thinking)".to_string(),
             model_type: "chat".to_string(),
-            max_tokens: 32000,
+            max_tokens: 64000,
         },
         Model {
             id: "claude-haiku-4-5-20251001".to_string(),
@@ -356,9 +428,7 @@ fn build_model_list() -> Vec<Model> {
 /// GET /v1/models/:model_id
 ///
 /// 返回指定模型的信息
-pub async fn get_model(
-    axum::extract::Path(model_id): axum::extract::Path<String>,
-) -> Response {
+pub async fn get_model(axum::extract::Path(model_id): axum::extract::Path<String>) -> Response {
     tracing::info!(model_id = %model_id, "Received GET /v1/models/:model_id request");
 
     // 复用 get_models 的模型列表，查找匹配的模型
@@ -483,9 +553,9 @@ pub async fn post_messages(
     // 估算输入 tokens
     let input_tokens = token::count_all_tokens(
         payload.model.clone(),
-        payload.system,
-        payload.messages,
-        payload.tools,
+        payload.system.clone(),
+        payload.messages.clone(),
+        payload.tools.clone(),
     ) as i32;
 
     // 检查是否启用了thinking
@@ -496,16 +566,14 @@ pub async fn post_messages(
         .unwrap_or(false);
 
     // 提取用量追踪信息
-    let pinned_credential_id = identity.as_ref().map(|ext| ext.0.pinned_credential_id).flatten();
+    let pinned_credential_id = identity
+        .as_ref()
+        .map(|ext| ext.0.pinned_credential_id)
+        .flatten();
     let api_key_id = identity.map(|ext| ext.0.id);
     let usage_tracker = state.usage_tracker.clone();
 
-    // 计算 prompt cache 模拟 usage
-    let prompt_cache_usage = crate::cache::PromptCacheUsage::from_ratio_config(
-        input_tokens,
-        crate::cache::CacheSimulationRatioConfig::fixed(0.85),
-        0.1,
-    );
+    let prompt_cache_usage = build_kv_prompt_cache_usage("/v1/messages", &payload, input_tokens);
 
     if payload.stream {
         // 流式响应
@@ -553,9 +621,12 @@ async fn handle_stream_request(
     client_ip: Option<String>,
 ) -> Response {
     // 调用 Kiro API（支持多凭据故障转移）
-    let response = match provider.call_api_stream(request_body, pinned_credential_id).await {
+    let response = match provider
+        .call_api_stream(request_body, pinned_credential_id)
+        .await
+    {
         Ok(resp) => resp,
-        Err(e) => return map_provider_error_with_context(e, model, input_tokens),
+        Err(e) => return map_provider_error_with_context(e, "/v1/messages", model, request_body, input_tokens),
     };
 
     // 创建流处理上下文
@@ -567,7 +638,14 @@ async fn handle_stream_request(
     let initial_events = ctx.generate_initial_events();
 
     // 创建 SSE 流
-    let stream = create_sse_stream(response, ctx, initial_events);
+    let stream = create_sse_stream(
+        response,
+        ctx,
+        initial_events,
+        "/v1/messages",
+        model.to_string(),
+        request_body.to_string(),
+    );
 
     // 返回 SSE 响应
     Response::builder()
@@ -592,6 +670,9 @@ fn create_sse_stream(
     response: reqwest::Response,
     ctx: StreamContext,
     initial_events: Vec<SseEvent>,
+    endpoint: &'static str,
+    model: String,
+    request_body: String,
 ) -> impl Stream<Item = Result<Bytes, Infallible>> {
     // 先发送初始事件
     let initial_stream = stream::iter(
@@ -604,8 +685,11 @@ fn create_sse_stream(
     let body_stream = response.bytes_stream();
 
     let processing_stream = stream::unfold(
-        (body_stream, ctx, EventStreamDecoder::new(), false, interval(Duration::from_secs(PING_INTERVAL_SECS))),
-        |(mut body_stream, mut ctx, mut decoder, finished, mut ping_interval)| async move {
+        (body_stream, ctx, EventStreamDecoder::new(), false, interval(Duration::from_secs(PING_INTERVAL_SECS)), false),
+        move |(mut body_stream, mut ctx, mut decoder, finished, mut ping_interval, mut failure_prompt_recorded)| {
+            let model = model.clone();
+            let request_body = request_body.clone();
+            async move {
             if finished {
                 return None;
             }
@@ -626,6 +710,30 @@ fn create_sse_stream(
                                 match result {
                                     Ok(frame) => {
                                         if let Ok(event) = Event::from_frame(frame) {
+                                            if !failure_prompt_recorded {
+                                                let maybe_error = match &event {
+                                                    Event::Error {
+                                                        error_code,
+                                                        error_message,
+                                                    } => Some(format!("{} - {}", error_code, error_message)),
+                                                    Event::Exception {
+                                                        exception_type,
+                                                        message,
+                                                    } => Some(format!("{} - {}", exception_type, message)),
+                                                    _ => None,
+                                                };
+                                                if let Some(error_text) = maybe_error {
+                                                    failure_prompt_recorded =
+                                                        failure_prompt_log::maybe_record_failure_prompt(
+                                                            None,
+                                                            endpoint,
+                                                            &model,
+                                                            &request_body,
+                                                            "stream_event",
+                                                            &error_text,
+                                                        );
+                                                }
+                                            }
                                             let sse_events = ctx.process_kiro_event(&event);
                                             events.extend(sse_events);
                                         }
@@ -642,7 +750,7 @@ fn create_sse_stream(
                                 .map(|e| Ok(Bytes::from(e.to_sse_string())))
                                 .collect();
 
-                            Some((stream::iter(bytes), (body_stream, ctx, decoder, false, ping_interval)))
+                            Some((stream::iter(bytes), (body_stream, ctx, decoder, false, ping_interval, failure_prompt_recorded)))
                         }
                         Some(Err(e)) => {
                             tracing::error!("读取响应流失败: {}", e);
@@ -652,7 +760,7 @@ fn create_sse_stream(
                                 .into_iter()
                                 .map(|e| Ok(Bytes::from(e.to_sse_string())))
                                 .collect();
-                            Some((stream::iter(bytes), (body_stream, ctx, decoder, true, ping_interval)))
+                            Some((stream::iter(bytes), (body_stream, ctx, decoder, true, ping_interval, failure_prompt_recorded)))
                         }
                         None => {
                             // 流结束，发送最终事件
@@ -661,7 +769,7 @@ fn create_sse_stream(
                                 .into_iter()
                                 .map(|e| Ok(Bytes::from(e.to_sse_string())))
                                 .collect();
-                            Some((stream::iter(bytes), (body_stream, ctx, decoder, true, ping_interval)))
+                            Some((stream::iter(bytes), (body_stream, ctx, decoder, true, ping_interval, failure_prompt_recorded)))
                         }
                     }
                 }
@@ -669,9 +777,10 @@ fn create_sse_stream(
                 _ = ping_interval.tick() => {
                     tracing::trace!("发送 ping 保活事件");
                     let bytes: Vec<Result<Bytes, Infallible>> = vec![Ok(create_ping_sse())];
-                    Some((stream::iter(bytes), (body_stream, ctx, decoder, false, ping_interval)))
+                    Some((stream::iter(bytes), (body_stream, ctx, decoder, false, ping_interval, failure_prompt_recorded)))
                 }
             }
+        }
         },
     )
     .flatten();
@@ -697,7 +806,7 @@ async fn handle_non_stream_request(
     // 调用 Kiro API（支持多凭据故障转移）
     let response = match provider.call_api(request_body, pinned_credential_id).await {
         Ok(resp) => resp,
-        Err(e) => return map_provider_error_with_context(e, model, input_tokens),
+        Err(e) => return map_provider_error_with_context(e, "/v1/messages", model, request_body, input_tokens),
     };
 
     // 读取响应体
@@ -728,6 +837,7 @@ async fn handle_non_stream_request(
     let mut stop_reason = "end_turn".to_string();
     // 从 contextUsageEvent 计算的实际输入 tokens
     let mut context_input_tokens: Option<i32> = None;
+    let mut failure_prompt_recorded = false;
 
     // 收集工具调用的增量 JSON
     let mut tool_json_buffers: std::collections::HashMap<String, String> =
@@ -755,14 +865,14 @@ async fn handle_non_stream_request(
                                 let input: serde_json::Value = if buffer.is_empty() {
                                     serde_json::json!({})
                                 } else {
-                                    serde_json::from_str(buffer)
-                                        .unwrap_or_else(|e| {
-                                            tracing::warn!(
-                                                "工具输入 JSON 解析失败: {}, tool_use_id: {}",
-                                                e, tool_use.tool_use_id
-                                            );
-                                            serde_json::json!({})
-                                        })
+                                    serde_json::from_str(buffer).unwrap_or_else(|e| {
+                                        tracing::warn!(
+                                            "工具输入 JSON 解析失败: {}, tool_use_id: {}",
+                                            e,
+                                            tool_use.tool_use_id
+                                        );
+                                        serde_json::json!({})
+                                    })
                                 };
 
                                 tool_uses.push(json!({
@@ -791,9 +901,38 @@ async fn handle_non_stream_request(
                                 actual_input_tokens
                             );
                         }
-                        Event::Exception { exception_type, .. } => {
+                        Event::Error {
+                            error_code,
+                            error_message,
+                        } => {
+                            if !failure_prompt_recorded {
+                                let error_text = format!("{} - {}", error_code, error_message);
+                                failure_prompt_recorded =
+                                    failure_prompt_log::maybe_record_failure_prompt(
+                                        None,
+                                        "/v1/messages",
+                                        model,
+                                        request_body,
+                                        "event",
+                                        &error_text,
+                                    );
+                            }
+                        }
+                        Event::Exception { exception_type, message } => {
                             if exception_type == "ContentLengthExceededException" {
                                 stop_reason = "max_tokens".to_string();
+                            }
+                            if !failure_prompt_recorded {
+                                let error_text = format!("{} - {}", exception_type, message);
+                                failure_prompt_recorded =
+                                    failure_prompt_log::maybe_record_failure_prompt(
+                                        None,
+                                        "/v1/messages",
+                                        model,
+                                        request_body,
+                                        "event",
+                                        &error_text,
+                                    );
                             }
                         }
                         _ => {}
@@ -828,7 +967,8 @@ async fn handle_non_stream_request(
 
     // 使用从 contextUsageEvent 计算的 input_tokens，如果没有则使用估算值
     let raw_final_input_tokens = context_input_tokens.unwrap_or(input_tokens);
-    let final_input_tokens = super::stream::cap_input_tokens_pub(raw_final_input_tokens, input_tokens);
+    let final_input_tokens =
+        super::stream::cap_input_tokens_pub(raw_final_input_tokens, input_tokens);
 
     // 对外报告的 output_tokens 限制在安全范围
     let reported_output_tokens = output_tokens.min(380);
@@ -838,7 +978,15 @@ async fn handle_non_stream_request(
 
     // 记录用量（内部使用真实值）
     if let (Some(tracker), Some(key_id)) = (&usage_tracker, api_key_id) {
-        tracker.record(key_id, pinned_credential_id, model.to_string(), final_input_tokens, output_tokens, None, client_ip);
+        tracker.record(
+            key_id,
+            pinned_credential_id,
+            model.to_string(),
+            final_input_tokens,
+            output_tokens,
+            None,
+            client_ip,
+        );
     }
 
     // 构建 Anthropic 响应
@@ -872,14 +1020,10 @@ fn override_thinking_from_model_name(payload: &mut MessagesRequest) {
         return;
     }
 
-    let is_opus_4_6 =
-        model_lower.contains("opus") && (model_lower.contains("4-6") || model_lower.contains("4.6"));
+    let is_opus_4_6 = model_lower.contains("opus")
+        && (model_lower.contains("4-6") || model_lower.contains("4.6"));
 
-    let thinking_type = if is_opus_4_6 {
-        "adaptive"
-    } else {
-        "enabled"
-    };
+    let thinking_type = if is_opus_4_6 { "adaptive" } else { "enabled" };
 
     tracing::info!(
         model = %payload.model,
@@ -891,7 +1035,7 @@ fn override_thinking_from_model_name(payload: &mut MessagesRequest) {
         thinking_type: thinking_type.to_string(),
         budget_tokens: 20000,
     });
-    
+
     if is_opus_4_6 {
         payload.output_config = Some(OutputConfig {
             effort: "high".to_string(),
@@ -1026,9 +1170,9 @@ pub async fn post_messages_cc(
     // 估算输入 tokens
     let input_tokens = token::count_all_tokens(
         payload.model.clone(),
-        payload.system,
-        payload.messages,
-        payload.tools,
+        payload.system.clone(),
+        payload.messages.clone(),
+        payload.tools.clone(),
     ) as i32;
 
     // 检查是否启用了thinking
@@ -1039,16 +1183,14 @@ pub async fn post_messages_cc(
         .unwrap_or(false);
 
     // 提取用量追踪信息
-    let pinned_credential_id = identity.as_ref().map(|ext| ext.0.pinned_credential_id).flatten();
+    let pinned_credential_id = identity
+        .as_ref()
+        .map(|ext| ext.0.pinned_credential_id)
+        .flatten();
     let api_key_id = identity.map(|ext| ext.0.id);
     let usage_tracker = state.usage_tracker.clone();
 
-    // 计算 prompt cache 模拟 usage
-    let prompt_cache_usage = crate::cache::PromptCacheUsage::from_ratio_config(
-        input_tokens,
-        crate::cache::CacheSimulationRatioConfig::fixed(0.85),
-        0.1,
-    );
+    let prompt_cache_usage = build_kv_prompt_cache_usage("/cc/v1/messages", &payload, input_tokens);
 
     if payload.stream {
         // 流式响应（缓冲模式）
@@ -1099,9 +1241,12 @@ async fn handle_stream_request_buffered(
     client_ip: Option<String>,
 ) -> Response {
     // 调用 Kiro API（支持多凭据故障转移）
-    let response = match provider.call_api_stream(request_body, pinned_credential_id).await {
+    let response = match provider
+        .call_api_stream(request_body, pinned_credential_id)
+        .await
+    {
         Ok(resp) => resp,
-        Err(e) => return map_provider_error_with_context(e, model, estimated_input_tokens),
+        Err(e) => return map_provider_error_with_context(e, "/cc/v1/messages", model, request_body, estimated_input_tokens),
     };
 
     // 创建缓冲流处理上下文
@@ -1110,7 +1255,13 @@ async fn handle_stream_request_buffered(
         .with_prompt_cache_usage(prompt_cache_usage);
 
     // 创建缓冲 SSE 流
-    let stream = create_buffered_sse_stream(response, ctx);
+    let stream = create_buffered_sse_stream(
+        response,
+        ctx,
+        "/cc/v1/messages",
+        model.to_string(),
+        request_body.to_string(),
+    );
 
     // 返回 SSE 响应
     Response::builder()
@@ -1132,6 +1283,9 @@ async fn handle_stream_request_buffered(
 fn create_buffered_sse_stream(
     response: reqwest::Response,
     ctx: BufferedStreamContext,
+    endpoint: &'static str,
+    model: String,
+    request_body: String,
 ) -> impl Stream<Item = Result<Bytes, Infallible>> {
     let body_stream = response.bytes_stream();
 
@@ -1142,8 +1296,12 @@ fn create_buffered_sse_stream(
             EventStreamDecoder::new(),
             false,
             interval(Duration::from_secs(PING_INTERVAL_SECS)),
+            false,
         ),
-        |(mut body_stream, mut ctx, mut decoder, finished, mut ping_interval)| async move {
+        move |(mut body_stream, mut ctx, mut decoder, finished, mut ping_interval, mut failure_prompt_recorded)| {
+            let model = model.clone();
+            let request_body = request_body.clone();
+            async move {
             if finished {
                 return None;
             }
@@ -1158,7 +1316,7 @@ fn create_buffered_sse_stream(
                     _ = ping_interval.tick() => {
                         tracing::trace!("发送 ping 保活事件（缓冲模式）");
                         let bytes: Vec<Result<Bytes, Infallible>> = vec![Ok(create_ping_sse())];
-                        return Some((stream::iter(bytes), (body_stream, ctx, decoder, false, ping_interval)));
+                        return Some((stream::iter(bytes), (body_stream, ctx, decoder, false, ping_interval, failure_prompt_recorded)));
                     }
 
                     // 然后处理数据流
@@ -1174,6 +1332,30 @@ fn create_buffered_sse_stream(
                                     match result {
                                         Ok(frame) => {
                                             if let Ok(event) = Event::from_frame(frame) {
+                                                if !failure_prompt_recorded {
+                                                    let maybe_error = match &event {
+                                                        Event::Error {
+                                                            error_code,
+                                                            error_message,
+                                                        } => Some(format!("{} - {}", error_code, error_message)),
+                                                        Event::Exception {
+                                                            exception_type,
+                                                            message,
+                                                        } => Some(format!("{} - {}", exception_type, message)),
+                                                        _ => None,
+                                                    };
+                                                    if let Some(error_text) = maybe_error {
+                                                        failure_prompt_recorded =
+                                                            failure_prompt_log::maybe_record_failure_prompt(
+                                                                None,
+                                                                endpoint,
+                                                                &model,
+                                                                &request_body,
+                                                                "stream_event",
+                                                                &error_text,
+                                                            );
+                                                    }
+                                                }
                                                 // 缓冲事件（复用 StreamContext 的处理逻辑）
                                                 ctx.process_and_buffer(&event);
                                             }
@@ -1193,7 +1375,7 @@ fn create_buffered_sse_stream(
                                     .into_iter()
                                     .map(|e| Ok(Bytes::from(e.to_sse_string())))
                                     .collect();
-                                return Some((stream::iter(bytes), (body_stream, ctx, decoder, true, ping_interval)));
+                                return Some((stream::iter(bytes), (body_stream, ctx, decoder, true, ping_interval, failure_prompt_recorded)));
                             }
                             None => {
                                 // 流结束，完成处理并返回所有事件（已更正 input_tokens）
@@ -1202,12 +1384,13 @@ fn create_buffered_sse_stream(
                                     .into_iter()
                                     .map(|e| Ok(Bytes::from(e.to_sse_string())))
                                     .collect();
-                                return Some((stream::iter(bytes), (body_stream, ctx, decoder, true, ping_interval)));
+                                return Some((stream::iter(bytes), (body_stream, ctx, decoder, true, ping_interval, failure_prompt_recorded)));
                             }
                         }
                     }
                 }
             }
+        }
         },
     )
     .flatten()

@@ -121,7 +121,12 @@ pub async fn auth_middleware(
     // 2. 尝试子 API Key 认证
     if let Some(manager) = &state.api_key_manager {
         match manager.authenticate(&key) {
-            ApiKeyAuthResult::Valid { id, name, spending_limit, pinned_credential_id } => {
+            ApiKeyAuthResult::Valid {
+                id,
+                name,
+                spending_limit,
+                pinned_credential_id,
+            } => {
                 // 懒激活：首次使用时激活 key
                 if let Err(e) = manager.activate_key(id) {
                     tracing::warn!(api_key_id = id, error = %e, "激活 API Key 失败");

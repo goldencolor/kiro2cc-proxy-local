@@ -236,6 +236,52 @@ pub struct LoadBalancingModeResponse {
     pub mode: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestDetailsQuery {
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestDetailsResponse {
+    pub total: usize,
+    pub records: Vec<RequestDetailItem>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestDetailItem {
+    pub recorded_at: String,
+    pub request_id: String,
+    pub endpoint: String,
+    pub model: String,
+    pub credential_id: u64,
+    pub stream: bool,
+    pub cache_hit: bool,
+    pub input_tokens: i32,
+    pub cached_tokens: i32,
+    pub output_tokens: i32,
+    pub cache_ratio: f64,
+    pub cost_usd: f64,
+    pub credits_used: f64,
+    pub special_settings: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KvCacheConfigResponse {
+    pub cache_read_efficiency: f64,
+    pub kv_cache_ttl_secs: i64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetKvCacheConfigRequest {
+    pub cache_read_efficiency: Option<f64>,
+    pub kv_cache_ttl_secs: Option<i64>,
+}
+
 /// 设置负载均衡模式请求
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]

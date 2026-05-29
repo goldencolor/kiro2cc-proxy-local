@@ -1489,6 +1489,22 @@ impl MultiTokenManager {
     // Admin API 方法
     // ========================================================================
 
+    /// 导出当前完整凭据列表（用于 Admin API 备份）
+    pub fn export_credentials(&self) -> Vec<KiroCredentials> {
+        let mut credentials: Vec<KiroCredentials> = self
+            .entries
+            .lock()
+            .iter()
+            .map(|entry| {
+                let mut credential = entry.credentials.clone();
+                credential.disabled = entry.disabled;
+                credential
+            })
+            .collect();
+        credentials.sort_by_key(|credential| credential.priority);
+        credentials
+    }
+
     /// 获取管理器状态快照（用于 Admin API）
     pub fn snapshot(&self) -> ManagerSnapshot {
         let entries = self.entries.lock();

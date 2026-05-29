@@ -2,15 +2,15 @@
 
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     response::IntoResponse,
 };
 
 use super::{
     middleware::AdminState,
     types::{
-        AddCredentialRequest, SetDisabledRequest, SetLoadBalancingModeRequest, SetPriorityRequest,
-        SuccessResponse, UpdateCredentialRequest,
+        AddCredentialRequest, RequestDetailsQuery, SetDisabledRequest, SetKvCacheConfigRequest,
+        SetLoadBalancingModeRequest, SetPriorityRequest, SuccessResponse, UpdateCredentialRequest,
     },
 };
 
@@ -19,6 +19,12 @@ use super::{
 pub async fn get_all_credentials(State(state): State<AdminState>) -> impl IntoResponse {
     let response = state.service.get_all_credentials();
     Json(response)
+}
+
+/// GET /api/admin/credentials/export
+/// 导出完整凭据 JSON（包含敏感 token）
+pub async fn export_credentials(State(state): State<AdminState>) -> impl IntoResponse {
+    Json(state.service.export_credentials())
 }
 
 /// POST /api/admin/credentials/:id/disabled
@@ -82,6 +88,23 @@ pub async fn get_credential_balance(
     }
 }
 
+pub async fn get_request_details(
+    State(state): State<AdminState>,
+    Query(query): Query<RequestDetailsQuery>,
+) -> impl IntoResponse {
+    match state.service.get_request_details(query.limit) {
+        Ok(response) => Json(response).into_response(),
+        Err(e) => (e.status_code(), Json(e.into_response())).into_response(),
+    }
+}
+
+pub async fn clear_request_details(State(state): State<AdminState>) -> impl IntoResponse {
+    match state.service.clear_request_details() {
+        Ok(_) => Json(SuccessResponse::new("请求明细已清空".to_string())).into_response(),
+        Err(e) => (e.status_code(), Json(e.into_response())).into_response(),
+    }
+}
+
 /// POST /api/admin/credentials
 /// 添加新凭据
 pub async fn add_credential(
@@ -138,6 +161,22 @@ pub async fn set_load_balancing_mode(
     }
 }
 
+/// GET /api/admin/config/kv-cache
+pub async fn get_kv_cache_config(State(state): State<AdminState>) -> impl IntoResponse {
+    Json(state.service.get_kv_cache_config())
+}
+
+/// PUT /api/admin/config/kv-cache
+pub async fn set_kv_cache_config(
+    State(state): State<AdminState>,
+    Json(payload): Json<SetKvCacheConfigRequest>,
+) -> impl IntoResponse {
+    match state.service.set_kv_cache_config(payload) {
+        Ok(response) => Json(response).into_response(),
+        Err(e) => (e.status_code(), Json(e.into_response())).into_response(),
+    }
+}
+
 /// 将 API Key 脱敏显示（保留前半部分 + ***）
 fn mask_key(key: &str) -> String {
     let visible = key.len() / 2;
@@ -170,13 +209,21 @@ pub async fn set_auth_keys(
     if let Some(ref key) = payload.api_key {
         if key.trim().is_empty() {
             let error = super::types::AdminErrorResponse::invalid_request("apiKey 不能为空");
-            return (axum::http::StatusCode::BAD_REQUEST, Json(serde_json::json!(error))).into_response();
+            return (
+                axum::http::StatusCode::BAD_REQUEST,
+                Json(serde_json::json!(error)),
+            )
+                .into_response();
         }
     }
     if let Some(ref key) = payload.admin_api_key {
         if key.trim().is_empty() {
             let error = super::types::AdminErrorResponse::invalid_request("adminApiKey 不能为空");
-            return (axum::http::StatusCode::BAD_REQUEST, Json(serde_json::json!(error))).into_response();
+            return (
+                axum::http::StatusCode::BAD_REQUEST,
+                Json(serde_json::json!(error)),
+            )
+                .into_response();
         }
     }
 
@@ -194,8 +241,13 @@ pub async fn set_auth_keys(
     if let Some(ref config_path) = state.config_path {
         if let Err(e) = persist_auth_keys(config_path, &payload.api_key, &payload.admin_api_key) {
             tracing::error!("持久化认证密钥失败: {}", e);
-            let error = super::types::AdminErrorResponse::internal_error("持久化失败，但运行时已生效");
-            return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!(error))).into_response();
+            let error =
+                super::types::AdminErrorResponse::internal_error("持久化失败，但运行时已生效");
+            return (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!(error)),
+            )
+                .into_response();
         }
     }
 

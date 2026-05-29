@@ -171,7 +171,10 @@ impl UsageTracker {
             let mut records = self.records.write();
             records.push(record);
 
-            let count = records.iter().filter(|r| r.api_key_id == api_key_id).count();
+            let count = records
+                .iter()
+                .filter(|r| r.api_key_id == api_key_id)
+                .count();
             if count > MAX_RECORDS_PER_KEY {
                 let excess = count - MAX_RECORDS_PER_KEY;
                 // 找出该 key 按时间升序排列的索引，取最老的 excess 个删除
@@ -279,7 +282,12 @@ impl UsageTracker {
         filtered.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         let total = filtered.len();
         let start = page.saturating_sub(1) * page_size;
-        let page_records = filtered.into_iter().skip(start).take(page_size).cloned().collect();
+        let page_records = filtered
+            .into_iter()
+            .skip(start)
+            .take(page_size)
+            .cloned()
+            .collect();
         (page_records, total)
     }
 
@@ -301,7 +309,12 @@ impl UsageTracker {
         filtered.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         let total = filtered.len();
         let start = page.saturating_sub(1) * page_size;
-        let page_records = filtered.into_iter().skip(start).take(page_size).cloned().collect();
+        let page_records = filtered
+            .into_iter()
+            .skip(start)
+            .take(page_size)
+            .cloned()
+            .collect();
         (page_records, total)
     }
 }

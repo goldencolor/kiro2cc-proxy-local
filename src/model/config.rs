@@ -138,6 +138,12 @@ pub struct Config {
     #[serde(default = "default_max_total_retries")]
     pub max_total_retries: usize,
 
+    #[serde(default = "default_cache_read_efficiency")]
+    pub cache_read_efficiency: f64,
+
+    #[serde(default = "default_kv_cache_ttl_secs")]
+    pub kv_cache_ttl_secs: i64,
+
     /// 配置文件路径（运行时元数据，不写入 JSON）
     #[serde(skip)]
     config_path: Option<PathBuf>,
@@ -200,6 +206,14 @@ fn default_max_total_retries() -> usize {
     9
 }
 
+fn default_cache_read_efficiency() -> f64 {
+    0.87
+}
+
+fn default_kv_cache_ttl_secs() -> i64 {
+    3600
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -230,6 +244,8 @@ impl Default for Config {
             max_concurrent_requests: default_max_concurrent_requests(),
             max_retries_per_credential: default_max_retries_per_credential(),
             max_total_retries: default_max_total_retries(),
+            cache_read_efficiency: default_cache_read_efficiency(),
+            kv_cache_ttl_secs: default_kv_cache_ttl_secs(),
             config_path: None,
         }
     }
@@ -294,6 +310,12 @@ impl Config {
         }
         if self.max_total_retries == 0 {
             anyhow::bail!("maxTotalRetries 必须大于 0");
+        }
+        if !(0.0..=1.0).contains(&self.cache_read_efficiency) {
+            anyhow::bail!("cacheReadEfficiency 必须在 0.0 到 1.0 之间");
+        }
+        if self.kv_cache_ttl_secs < 60 {
+            anyhow::bail!("kvCacheTtlSecs 必须至少为 60");
         }
         Ok(())
     }

@@ -28,6 +28,32 @@ export interface CredentialStatusItem {
   runtimeEndpoint?: string
 }
 
+export interface ExportedCredential {
+  id?: number
+  accessToken?: string
+  refreshToken?: string
+  kiroApiKey?: string
+  profileArn?: string
+  expiresAt?: string
+  authMethod?: string
+  clientId?: string
+  clientSecret?: string
+  priority?: number
+  region?: string
+  authRegion?: string
+  apiRegion?: string
+  runtimeEndpoint?: string
+  managementEndpoint?: string
+  machineId?: string
+  email?: string
+  nickname?: string
+  subscriptionTitle?: string
+  proxyUrl?: string
+  proxyUsername?: string
+  proxyPassword?: string
+  disabled?: boolean
+}
+
 // 余额响应
 export interface BalanceResponse {
   id: number
@@ -40,6 +66,28 @@ export interface BalanceResponse {
 }
 
 // 成功响应
+export interface RequestDetailsResponse {
+  total: number
+  records: RequestDetailItem[]
+}
+
+export interface RequestDetailItem {
+  recordedAt: string
+  requestId: string
+  endpoint: string
+  model: string
+  credentialId: number
+  stream: boolean
+  cacheHit: boolean
+  inputTokens: number
+  cachedTokens: number
+  outputTokens: number
+  cacheRatio: number
+  costUsd: number
+  creditsUsed: number
+  specialSettings: string[]
+}
+
 export interface SuccessResponse {
   success: boolean
   message: string
@@ -182,4 +230,20 @@ export interface UsageRecordsResponse {
   page: number
   pageSize: number
   totalPages: number
+}
+
+export interface ModelItem {
+  id: string
+  object: string
+  created: number
+  owned_by: string
+  display_name: string
+  type?: string
+  model_type?: string
+  max_tokens: number
+}
+
+export interface ModelsResponse {
+  object: string
+  data: ModelItem[]
 }

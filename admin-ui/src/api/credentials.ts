@@ -15,6 +15,9 @@ import type {
   UsageSummary,
   RpmSnapshot,
   UsageRecordsResponse,
+  ModelsResponse,
+  ExportedCredential,
+  RequestDetailsResponse,
 } from '@/types/api'
 
 // 创建 axios 实例
@@ -37,6 +40,11 @@ api.interceptors.request.use((config) => {
 // 获取所有凭据状态
 export async function getCredentials(): Promise<CredentialsStatusResponse> {
   const { data } = await api.get<CredentialsStatusResponse>('/credentials')
+  return data
+}
+
+export async function exportCredentials(): Promise<ExportedCredential[]> {
+  const { data } = await api.get<ExportedCredential[]>('/credentials/export')
   return data
 }
 
@@ -113,8 +121,49 @@ export async function setLoadBalancingMode(mode: 'priority' | 'balanced'): Promi
 // ============ 服务器信息 ============
 
 // 获取服务器连接信息
+export interface KvCacheConfig {
+  cacheReadEfficiency: number
+  kvCacheTtlSecs: number
+}
+
+export async function getKvCacheConfig(): Promise<KvCacheConfig> {
+  const { data } = await api.get<KvCacheConfig>('/config/kv-cache')
+  return data
+}
+
+export async function setKvCacheConfig(config: Partial<KvCacheConfig>): Promise<KvCacheConfig> {
+  const { data } = await api.put<KvCacheConfig>('/config/kv-cache', config)
+  return data
+}
+
+export async function getRequestDetails(limit?: number): Promise<RequestDetailsResponse> {
+  const { data } = await api.get<RequestDetailsResponse>('/details', {
+    params: limit ? { limit } : undefined,
+  })
+  return data
+}
+
+export async function clearRequestDetails(): Promise<SuccessResponse> {
+  const { data } = await api.delete<SuccessResponse>('/details')
+  return data
+}
+
 export async function getServerInfo(): Promise<{ masterApiKey: string | null }> {
   const { data } = await api.get<{ masterApiKey: string | null }>('/server-info')
+  return data
+}
+
+export async function getModels(): Promise<ModelsResponse> {
+  const { masterApiKey } = await getServerInfo()
+  if (!masterApiKey) {
+    throw new Error('未配置主 API Key，无法获取模型列表')
+  }
+
+  const { data } = await axios.get<ModelsResponse>('/v1/models', {
+    headers: {
+      'x-api-key': masterApiKey,
+    },
+  })
   return data
 }
 

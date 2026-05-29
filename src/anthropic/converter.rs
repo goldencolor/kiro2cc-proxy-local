@@ -291,6 +291,8 @@ pub fn map_model(model: &str) -> Option<String> {
     } else if model_lower.contains("opus") {
         if model_lower.contains("4-5") || model_lower.contains("4.5") {
             Some("claude-opus-4.5".to_string())
+        } else if model_lower.contains("4-8") || model_lower.contains("4.8") {
+            Some("claude-opus-4.8".to_string())
         } else if model_lower.contains("4-7") || model_lower.contains("4.7") {
             Some("claude-opus-4.7".to_string())
         } else {
@@ -392,20 +394,43 @@ fn derive_agent_continuation_id(conversation_id: &str) -> String {
     let result = hasher.finalize();
     format!(
         "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-        result[0], result[1], result[2], result[3],
-        result[4], result[5],
-        result[6], result[7],
-        result[8], result[9],
-        result[10], result[11], result[12], result[13], result[14], result[15]
+        result[0],
+        result[1],
+        result[2],
+        result[3],
+        result[4],
+        result[5],
+        result[6],
+        result[7],
+        result[8],
+        result[9],
+        result[10],
+        result[11],
+        result[12],
+        result[13],
+        result[14],
+        result[15]
     )
 }
 
 /// 典型代码工具名称（用于 spectask 检测）
 const CODE_TOOL_NAMES: &[&str] = &[
-    "read", "write", "edit", "bash", "glob", "grep",
-    "read_file", "write_file", "edit_file", "run_bash",
-    "list_files", "search_files", "create_file", "delete_file",
-    "str_replace_editor", "computer",
+    "read",
+    "write",
+    "edit",
+    "bash",
+    "glob",
+    "grep",
+    "read_file",
+    "write_file",
+    "edit_file",
+    "run_bash",
+    "list_files",
+    "search_files",
+    "create_file",
+    "delete_file",
+    "str_replace_editor",
+    "computer",
 ];
 
 /// 确定代理任务类型
@@ -421,7 +446,9 @@ fn determine_agent_task_type(req: &MessagesRequest) -> &'static str {
     }
     let has_code_tool = tools.iter().any(|t| {
         let name_lower = t.name.to_lowercase();
-        CODE_TOOL_NAMES.iter().any(|&code_tool| name_lower == code_tool)
+        CODE_TOOL_NAMES
+            .iter()
+            .any(|&code_tool| name_lower == code_tool)
     });
     if has_code_tool { "spectask" } else { "vibe" }
 }
@@ -1699,6 +1726,18 @@ mod tests {
     }
 
     #[test]
+    fn test_map_model_opus_4_8() {
+        assert_eq!(
+            map_model("claude-opus-4-8"),
+            Some("claude-opus-4.8".to_string())
+        );
+        assert_eq!(
+            map_model("claude-opus-4-8-thinking"),
+            Some("claude-opus-4.8".to_string())
+        );
+    }
+
+    #[test]
     fn test_map_model_thinking_suffix_haiku() {
         // thinking 后缀不应影响 haiku 模型映射
         let result = map_model("claude-haiku-4-5-20251001-thinking");
@@ -1879,7 +1918,10 @@ mod tests {
         let req = MessagesRequest {
             model: "claude-sonnet-4".to_string(),
             max_tokens: 1024,
-            messages: vec![AnthropicMessage { role: "user".to_string(), content: serde_json::json!("hi") }],
+            messages: vec![AnthropicMessage {
+                role: "user".to_string(),
+                content: serde_json::json!("hi"),
+            }],
             stream: false,
             system: None,
             tools: None,
@@ -1897,12 +1939,27 @@ mod tests {
         let req = MessagesRequest {
             model: "claude-sonnet-4".to_string(),
             max_tokens: 1024,
-            messages: vec![AnthropicMessage { role: "user".to_string(), content: serde_json::json!("hi") }],
+            messages: vec![AnthropicMessage {
+                role: "user".to_string(),
+                content: serde_json::json!("hi"),
+            }],
             stream: false,
             system: None,
             tools: Some(vec![
-                Tool { tool_type: None, name: "Read".to_string(), description: "Read a file".to_string(), input_schema: Default::default(), max_uses: None },
-                Tool { tool_type: None, name: "Write".to_string(), description: "Write a file".to_string(), input_schema: Default::default(), max_uses: None },
+                Tool {
+                    tool_type: None,
+                    name: "Read".to_string(),
+                    description: "Read a file".to_string(),
+                    input_schema: Default::default(),
+                    max_uses: None,
+                },
+                Tool {
+                    tool_type: None,
+                    name: "Write".to_string(),
+                    description: "Write a file".to_string(),
+                    input_schema: Default::default(),
+                    max_uses: None,
+                },
             ]),
             tool_choice: None,
             thinking: None,
@@ -1918,12 +1975,19 @@ mod tests {
         let req = MessagesRequest {
             model: "claude-sonnet-4".to_string(),
             max_tokens: 1024,
-            messages: vec![AnthropicMessage { role: "user".to_string(), content: serde_json::json!("hi") }],
+            messages: vec![AnthropicMessage {
+                role: "user".to_string(),
+                content: serde_json::json!("hi"),
+            }],
             stream: false,
             system: None,
-            tools: Some(vec![
-                Tool { tool_type: None, name: "Bash".to_string(), description: "Run bash".to_string(), input_schema: Default::default(), max_uses: None },
-            ]),
+            tools: Some(vec![Tool {
+                tool_type: None,
+                name: "Bash".to_string(),
+                description: "Run bash".to_string(),
+                input_schema: Default::default(),
+                max_uses: None,
+            }]),
             tool_choice: None,
             thinking: None,
             output_config: None,
@@ -1969,7 +2033,6 @@ mod tests {
             "同一 session 的 agentContinuationId 应该稳定"
         );
     }
-
 
     #[test]
     fn test_convert_request_with_session_metadata() {

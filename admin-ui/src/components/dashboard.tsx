@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { RefreshCw, LogOut, Moon, Sun, Server, Plus, Upload, FileUp, Trash2, RotateCcw, CheckCircle2, Key, Settings } from 'lucide-react'
+import { RefreshCw, LogOut, Moon, Sun, Server, Plus, Upload, FileUp, Trash2, RotateCcw, CheckCircle2, Key, Settings, ListTree, Download, Database } from 'lucide-react'
 const kiroIcon = '/admin/kiro-icon.png'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -16,8 +16,10 @@ import { BatchVerifyDialog, type VerifyResult } from '@/components/batch-verify-
 import { ApiKeysPanel } from '@/components/api-keys-panel'
 import { SettingsPanel } from '@/components/settings-panel'
 import { UsageLogPage } from '@/components/usage-log-page'
+import { ModelListDialog } from '@/components/model-list-dialog'
+import { RequestDetailsPanel } from '@/components/request-details-panel'
 import { useCredentials, useDeleteCredential, useResetFailure, useRpm } from '@/hooks/use-credentials'
-import { getCredentialBalance } from '@/api/credentials'
+import { exportCredentials, getCredentialBalance } from '@/api/credentials'
 import { extractErrorMessage } from '@/lib/utils'
 import type { BalanceResponse, CredentialStatusItem } from '@/types/api'
 
@@ -26,13 +28,14 @@ interface DashboardProps {
 }
 
 export function Dashboard({ onLogout }: DashboardProps) {
-  const [activeTab, setActiveTab] = useState<'credentials' | 'apikeys' | 'settings'>('credentials')
+  const [activeTab, setActiveTab] = useState<'credentials' | 'apikeys' | 'details' | 'settings'>('credentials')
   const [detailCredentialId, setDetailCredentialId] = useState<number | null>(null)
   const [selectedCredentialId, setSelectedCredentialId] = useState<number | null>(null)
   const [balanceDialogOpen, setBalanceDialogOpen] = useState(false)
   const [addDialogOpen, setAddDialogOpen] = useState(false)
   const [batchImportDialogOpen, setBatchImportDialogOpen] = useState(false)
   const [kamImportDialogOpen, setKamImportDialogOpen] = useState(false)
+  const [modelListOpen, setModelListOpen] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [verifyDialogOpen, setVerifyDialogOpen] = useState(false)
   const [verifying, setVerifying] = useState(false)
@@ -41,6 +44,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const [balanceMap, setBalanceMap] = useState<Map<number, BalanceResponse>>(new Map())
   const [loadingBalanceIds, setLoadingBalanceIds] = useState<Set<number>>(new Set())
   const [queryingInfo, setQueryingInfo] = useState(false)
+  const [exportingCredentials, setExportingCredentials] = useState(false)
   const [queryInfoProgress, setQueryInfoProgress] = useState({ current: 0, total: 0 })
   const [liveCreditsTotal, setLiveCreditsTotal] = useState<number | null>(null)
   const [liveCreditsQueried, setLiveCreditsQueried] = useState(0)
@@ -410,6 +414,29 @@ export function Dashboard({ onLogout }: DashboardProps) {
   }
 
   // 批量验活
+  const handleExportCredentials = async () => {
+    setExportingCredentials(true)
+    try {
+      const credentials = await exportCredentials()
+      const json = JSON.stringify(credentials, null, 2)
+      const blob = new Blob([json], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+      anchor.href = url
+      anchor.download = `kiro-credentials-${timestamp}.json`
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      URL.revokeObjectURL(url)
+      toast.success(`已导出 ${credentials.length} 个账号`)
+    } catch (error) {
+      toast.error(extractErrorMessage(error))
+    } finally {
+      setExportingCredentials(false)
+    }
+  }
+
   const handleBatchVerify = async () => {
     if (selectedIds.size === 0) {
       toast.error('请先选择要验活的凭据')
@@ -557,6 +584,15 @@ export function Dashboard({ onLogout }: DashboardProps) {
                 <span className="hidden sm:inline">API Keys</span>
               </Button>
               <Button
+                variant={activeTab === 'details' ? 'default' : 'ghost'}
+                size="sm"
+                onClick={() => setActiveTab('details')}
+                className="h-7 px-2 sm:px-3 text-xs"
+              >
+                <Database className="h-3 w-3 sm:mr-1" />
+                <span className="hidden sm:inline">请求明细</span>
+              </Button>
+              <Button
                 variant={activeTab === 'settings' ? 'default' : 'ghost'}
                 size="sm"
                 onClick={() => setActiveTab('settings')}
@@ -568,6 +604,10 @@ export function Dashboard({ onLogout }: DashboardProps) {
             </div>
           </div>
           <div className="flex items-center gap-1 sm:gap-2">
+            <Button variant="outline" size="sm" onClick={() => setModelListOpen(true)} className="h-8 px-2 sm:px-3">
+              <ListTree className="h-4 w-4 sm:mr-2" />
+              <span className="hidden sm:inline">模型列表</span>
+            </Button>
             <Button variant="ghost" size="icon" onClick={toggleDarkMode}>
               {darkMode ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
             </Button>
@@ -587,6 +627,8 @@ export function Dashboard({ onLogout }: DashboardProps) {
           <SettingsPanel />
         ) : activeTab === 'apikeys' ? (
           <ApiKeysPanel />
+        ) : activeTab === 'details' ? (
+          <RequestDetailsPanel />
         ) : (
         <>
         {/* 统计卡片 */}
@@ -726,6 +768,15 @@ export function Dashboard({ onLogout }: DashboardProps) {
                 <Upload className="h-4 w-4 sm:mr-2" />
                 <span className="hidden sm:inline">批量导入</span>
               </Button>
+              <Button
+                onClick={handleExportCredentials}
+                size="sm"
+                variant="outline"
+                disabled={exportingCredentials || !data?.credentials || data.credentials.length === 0}
+              >
+                <Download className="h-4 w-4 sm:mr-2" />
+                <span className="hidden sm:inline">{exportingCredentials ? '导出中...' : '批量导出'}</span>
+              </Button>
               <Button onClick={() => setAddDialogOpen(true)} size="sm">
                 <Plus className="h-4 w-4 sm:mr-2" />
                 <span className="hidden sm:inline">添加凭据</span>
@@ -829,6 +880,11 @@ export function Dashboard({ onLogout }: DashboardProps) {
         progress={verifyProgress}
         results={verifyResults}
         onCancel={handleCancelVerify}
+      />
+
+      <ModelListDialog
+        open={modelListOpen}
+        onOpenChange={setModelListOpen}
       />
     </div>
   )

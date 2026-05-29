@@ -20,9 +20,14 @@ import {
   getRpm,
   getAuthKeys,
   setAuthKeys,
+  getKvCacheConfig,
+  setKvCacheConfig,
+  getRequestDetails,
+  clearRequestDetails,
   getCredentialUsageRecords,
   getApiKeyUsageRecords,
 } from '@/api/credentials'
+import type { KvCacheConfig } from '@/api/credentials'
 import type { AddCredentialRequest, UpdateCredentialRequest, CreateApiKeyRequest, UpdateApiKeyRequest, BalanceResponse } from '@/types/api'
 
 // 查询凭据列表
@@ -146,6 +151,41 @@ export function useSetLoadBalancingMode() {
     mutationFn: setLoadBalancingMode,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['loadBalancingMode'] })
+    },
+  })
+}
+
+export function useKvCacheConfig() {
+  return useQuery({
+    queryKey: ['kvCacheConfig'],
+    queryFn: getKvCacheConfig,
+  })
+}
+
+export function useSetKvCacheConfig() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (config: Partial<KvCacheConfig>) => setKvCacheConfig(config),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['kvCacheConfig'] })
+    },
+  })
+}
+
+export function useRequestDetails(limit: number) {
+  return useQuery({
+    queryKey: ['requestDetails', limit],
+    queryFn: () => getRequestDetails(limit),
+    refetchInterval: 10000,
+  })
+}
+
+export function useClearRequestDetails() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: clearRequestDetails,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['requestDetails'] })
     },
   })
 }
