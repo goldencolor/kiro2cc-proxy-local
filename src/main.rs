@@ -1,5 +1,6 @@
 mod admin;
 mod admin_ui;
+mod alert;
 mod anthropic;
 mod cache;
 mod common;
@@ -149,6 +150,10 @@ async fn main() {
     anthropic::kv_cache::set_kv_cache_config(
         config.cache_read_efficiency,
         config.kv_cache_ttl_secs,
+    );
+    alert::set_wecom_webhook_config(
+        config.wecom_webhook_url.clone(),
+        config.all_credentials_unavailable_alert_cooldown_secs,
     );
 
     // 初始化 API Key 管理器和用量追踪器（Admin 启用时才加载）

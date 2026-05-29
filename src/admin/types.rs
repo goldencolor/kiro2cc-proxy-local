@@ -226,6 +226,47 @@ pub struct BalanceResponse {
     pub next_reset_at: Option<f64>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProbeCredentialResult {
+    pub id: u64,
+    pub success: bool,
+    pub disabled: bool,
+    pub duration_ms: u128,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subscription_title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remaining: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage_limit: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProbeCredentialsResponse {
+    pub total: usize,
+    pub success: usize,
+    pub failed: usize,
+    pub interval_ms: u64,
+    pub results: Vec<ProbeCredentialResult>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProbeCredentialsRequest {
+    #[serde(default)]
+    pub include_disabled: bool,
+    #[serde(default = "default_probe_interval_ms")]
+    pub interval_ms: u64,
+}
+
+fn default_probe_interval_ms() -> u64 {
+    2000
+}
+
 // ============ 负载均衡配置 ============
 
 /// 负载均衡模式响应
@@ -283,6 +324,20 @@ pub struct SetKvCacheConfigRequest {
 }
 
 /// 设置负载均衡模式请求
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AlertConfigResponse {
+    pub wecom_webhook_url: Option<String>,
+    pub all_credentials_unavailable_alert_cooldown_secs: u64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetAlertConfigRequest {
+    pub wecom_webhook_url: Option<Option<String>>,
+    pub all_credentials_unavailable_alert_cooldown_secs: Option<u64>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetLoadBalancingModeRequest {

@@ -5,6 +5,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use parking_lot::Mutex;
@@ -15,10 +16,11 @@ use crate::kiro::token_manager::MultiTokenManager;
 
 use super::error::AdminServiceError;
 use super::types::{
-    AddCredentialRequest, AddCredentialResponse, BalanceResponse, CredentialStatusItem,
-    CredentialsStatusResponse, KvCacheConfigResponse, LoadBalancingModeResponse,
-    RequestDetailItem, RequestDetailsResponse, SetKvCacheConfigRequest,
-    SetLoadBalancingModeRequest, UpdateCredentialRequest,
+    AddCredentialRequest, AddCredentialResponse, AlertConfigResponse, BalanceResponse,
+    CredentialStatusItem, CredentialsStatusResponse, KvCacheConfigResponse,
+    LoadBalancingModeResponse, ProbeCredentialResult, ProbeCredentialsRequest,
+    ProbeCredentialsResponse, RequestDetailItem, RequestDetailsResponse, SetAlertConfigRequest,
+    SetKvCacheConfigRequest, SetLoadBalancingModeRequest, UpdateCredentialRequest,
 };
 
 /// 余额缓存过期时间（秒），5 分钟
@@ -154,6 +156,15 @@ impl AdminService {
         if disabled && id == current_id {
             let _ = self.token_manager.switch_to_next();
         }
+        if disabled {
+            let snapshot = self.token_manager.snapshot();
+            if snapshot.available == 0 {
+                crate::alert::notify_all_credentials_unavailable(format!(
+                    "管理员手动禁用凭据 #{} 后，当前没有可用账号",
+                    id
+                ));
+            }
+        }
         Ok(())
     }
 
@@ -233,6 +244,76 @@ impl AdminService {
     }
 
     /// 添加新凭据
+    pub async fn probe_credential(&self, id: u64) -> ProbeCredentialResult {
+        let disabled = self
+            .token_manager
+            .snapshot()
+            .entries
+            .into_iter()
+            .find(|entry| entry.id == id)
+            .map(|entry| entry.disabled)
+            .unwrap_or(false);
+        let started = Instant::now();
+
+        match self.fetch_balance(id).await {
+            Ok(balance) => ProbeCredentialResult {
+                id,
+                success: true,
+                disabled,
+                duration_ms: started.elapsed().as_millis(),
+                message: "探测成功".to_string(),
+                subscription_title: balance.subscription_title,
+                remaining: Some(balance.remaining),
+                usage_limit: Some(balance.usage_limit),
+                error: None,
+            },
+            Err(e) => ProbeCredentialResult {
+                id,
+                success: false,
+                disabled,
+                duration_ms: started.elapsed().as_millis(),
+                message: "探测失败".to_string(),
+                subscription_title: None,
+                remaining: None,
+                usage_limit: None,
+                error: Some(e.to_string()),
+            },
+        }
+    }
+
+    pub async fn probe_credentials(
+        &self,
+        req: ProbeCredentialsRequest,
+    ) -> ProbeCredentialsResponse {
+        let interval_ms = req.interval_ms.clamp(500, 60_000);
+        let ids: Vec<u64> = self
+            .token_manager
+            .snapshot()
+            .entries
+            .into_iter()
+            .filter(|entry| req.include_disabled || !entry.disabled)
+            .map(|entry| entry.id)
+            .collect();
+
+        let mut results = Vec::with_capacity(ids.len());
+        for (index, id) in ids.iter().copied().enumerate() {
+            results.push(self.probe_credential(id).await);
+            if index + 1 < ids.len() {
+                tokio::time::sleep(Duration::from_millis(interval_ms)).await;
+            }
+        }
+
+        let success = results.iter().filter(|result| result.success).count();
+        let failed = results.len().saturating_sub(success);
+        ProbeCredentialsResponse {
+            total: results.len(),
+            success,
+            failed,
+            interval_ms,
+            results,
+        }
+    }
+
     pub async fn add_credential(
         &self,
         req: AddCredentialRequest,
@@ -401,6 +482,60 @@ impl AdminService {
     }
 
     // ============ 余额缓存持久化 ============
+
+    pub fn get_alert_config(&self) -> AlertConfigResponse {
+        let (wecom_webhook_url, cooldown_secs) = crate::alert::get_wecom_webhook_config();
+        AlertConfigResponse {
+            wecom_webhook_url,
+            all_credentials_unavailable_alert_cooldown_secs: cooldown_secs,
+        }
+    }
+
+    pub fn set_alert_config(
+        &self,
+        req: SetAlertConfigRequest,
+    ) -> Result<AlertConfigResponse, AdminServiceError> {
+        let config_path = self
+            .token_manager
+            .config()
+            .config_path()
+            .ok_or_else(|| AdminServiceError::InternalError("配置文件路径未知".to_string()))?;
+
+        let mut config = crate::model::config::Config::load(config_path)
+            .map_err(|e| AdminServiceError::InternalError(format!("加载配置失败: {}", e)))?;
+
+        if let Some(webhook) = req.wecom_webhook_url {
+            config.wecom_webhook_url = webhook.and_then(|v| {
+                let trimmed = v.trim().to_string();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed)
+                }
+            });
+        }
+        if let Some(cooldown) = req.all_credentials_unavailable_alert_cooldown_secs {
+            config.all_credentials_unavailable_alert_cooldown_secs = cooldown.max(60);
+        }
+
+        config
+            .validate()
+            .map_err(|e| AdminServiceError::InvalidCredential(e.to_string()))?;
+        config
+            .save()
+            .map_err(|e| AdminServiceError::InternalError(format!("保存配置失败: {}", e)))?;
+
+        crate::alert::set_wecom_webhook_config(
+            config.wecom_webhook_url.clone(),
+            config.all_credentials_unavailable_alert_cooldown_secs,
+        );
+
+        Ok(AlertConfigResponse {
+            wecom_webhook_url: config.wecom_webhook_url,
+            all_credentials_unavailable_alert_cooldown_secs:
+                config.all_credentials_unavailable_alert_cooldown_secs,
+        })
+    }
 
     pub fn get_request_details(
         &self,

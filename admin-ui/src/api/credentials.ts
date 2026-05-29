@@ -18,6 +18,8 @@ import type {
   ModelsResponse,
   ExportedCredential,
   RequestDetailsResponse,
+  ProbeCredentialResult,
+  ProbeCredentialsResponse,
 } from '@/types/api'
 
 // 创建 axios 实例
@@ -87,6 +89,22 @@ export async function getCredentialBalance(id: number): Promise<BalanceResponse>
 }
 
 // 添加新凭据
+export async function probeCredential(id: number): Promise<ProbeCredentialResult> {
+  const { data } = await api.post<ProbeCredentialResult>(`/credentials/${id}/probe`)
+  return data
+}
+
+export async function probeCredentials(params?: {
+  includeDisabled?: boolean
+  intervalMs?: number
+}): Promise<ProbeCredentialsResponse> {
+  const { data } = await api.post<ProbeCredentialsResponse>('/credentials/probe', {
+    includeDisabled: params?.includeDisabled ?? false,
+    intervalMs: params?.intervalMs ?? 2000,
+  })
+  return data
+}
+
 export async function addCredential(
   req: AddCredentialRequest
 ): Promise<AddCredentialResponse> {
@@ -126,6 +144,11 @@ export interface KvCacheConfig {
   kvCacheTtlSecs: number
 }
 
+export interface AlertConfig {
+  wecomWebhookUrl: string | null
+  allCredentialsUnavailableAlertCooldownSecs: number
+}
+
 export async function getKvCacheConfig(): Promise<KvCacheConfig> {
   const { data } = await api.get<KvCacheConfig>('/config/kv-cache')
   return data
@@ -133,6 +156,16 @@ export async function getKvCacheConfig(): Promise<KvCacheConfig> {
 
 export async function setKvCacheConfig(config: Partial<KvCacheConfig>): Promise<KvCacheConfig> {
   const { data } = await api.put<KvCacheConfig>('/config/kv-cache', config)
+  return data
+}
+
+export async function getAlertConfig(): Promise<AlertConfig> {
+  const { data } = await api.get<AlertConfig>('/config/alerts')
+  return data
+}
+
+export async function setAlertConfig(config: Partial<AlertConfig>): Promise<AlertConfig> {
+  const { data } = await api.put<AlertConfig>('/config/alerts', config)
   return data
 }
 

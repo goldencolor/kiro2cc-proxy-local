@@ -1392,6 +1392,12 @@ impl MultiTokenManager {
             entries.iter().any(|e| !e.disabled)
         };
         self.save_stats_debounced();
+        if !result {
+            crate::alert::notify_all_credentials_unavailable(format!(
+                "凭据 #{} 连续失败达到阈值后被禁用，当前没有可用账号",
+                id
+            ));
+        }
         result
     }
 
@@ -1442,6 +1448,12 @@ impl MultiTokenManager {
             }
         };
         self.save_stats_debounced();
+        if !result {
+            crate::alert::notify_all_credentials_unavailable(format!(
+                "凭据 #{} 额度已用尽后被禁用，当前没有可用账号",
+                id
+            ));
+        }
         result
     }
 

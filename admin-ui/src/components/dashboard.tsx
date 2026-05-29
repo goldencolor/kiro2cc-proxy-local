@@ -19,7 +19,7 @@ import { UsageLogPage } from '@/components/usage-log-page'
 import { ModelListDialog } from '@/components/model-list-dialog'
 import { RequestDetailsPanel } from '@/components/request-details-panel'
 import { useCredentials, useDeleteCredential, useResetFailure, useRpm } from '@/hooks/use-credentials'
-import { exportCredentials, getCredentialBalance } from '@/api/credentials'
+import { exportCredentials, getCredentialBalance, probeCredential, probeCredentials } from '@/api/credentials'
 import { extractErrorMessage } from '@/lib/utils'
 import type { BalanceResponse, CredentialStatusItem } from '@/types/api'
 
@@ -413,7 +413,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
     await queryAllBalances(allCredentials, false)
   }
 
-  // 批量验活
+  // 批量探测
   const handleExportCredentials = async () => {
     setExportingCredentials(true)
     try {
@@ -434,6 +434,44 @@ export function Dashboard({ onLogout }: DashboardProps) {
       toast.error(extractErrorMessage(error))
     } finally {
       setExportingCredentials(false)
+    }
+  }
+
+  const applyProbeResults = (results: Awaited<ReturnType<typeof probeCredentials>>['results']) => {
+    const nextResults = new Map<number, VerifyResult>()
+    results.forEach((result) => {
+      nextResults.set(result.id, result.success ? {
+        id: result.id,
+        status: 'success',
+        usage: result.remaining !== undefined && result.usageLimit !== undefined
+          ? `${result.remaining.toFixed(1)}/${result.usageLimit.toFixed(1)}`
+          : result.subscriptionTitle,
+      } : {
+        id: result.id,
+        status: 'failed',
+        error: result.error || result.message,
+      })
+    })
+    setVerifyResults(nextResults)
+    setVerifyProgress({ current: results.length, total: results.length })
+  }
+
+  const handleProbeAll = async () => {
+    setVerifying(true)
+    cancelVerifyRef.current = false
+    setVerifyDialogOpen(true)
+    setVerifyResults(new Map())
+    setVerifyProgress({ current: 0, total: data?.credentials.filter(c => !c.disabled).length || 0 })
+
+    try {
+      const response = await probeCredentials({ includeDisabled: false, intervalMs: 2000 })
+      applyProbeResults(response.results)
+      toast.success(`全局探测完成：成功 ${response.success}/${response.total}`)
+      refetch()
+    } catch (error) {
+      toast.error(extractErrorMessage(error))
+    } finally {
+      setVerifying(false)
     }
   }
 
@@ -463,7 +501,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
     for (let i = 0; i < ids.length; i++) {
       // 检查是否取消
       if (cancelVerifyRef.current) {
-        toast.info('已取消验活')
+        toast.info('已取消探测')
         break
       }
 
@@ -477,7 +515,10 @@ export function Dashboard({ onLogout }: DashboardProps) {
       })
 
       try {
-        const balance = await getCredentialBalance(id)
+        const result = await probeCredential(id)
+        if (!result.success) {
+          throw new Error(result.error || result.message)
+        }
         successCount++
 
         // 更新为成功状态
@@ -486,7 +527,9 @@ export function Dashboard({ onLogout }: DashboardProps) {
           newResults.set(id, {
             id,
             status: 'success',
-            usage: `${balance.currentUsage}/${balance.usageLimit}`
+            usage: result.remaining !== undefined && result.usageLimit !== undefined
+              ? `${result.remaining.toFixed(1)}/${result.usageLimit.toFixed(1)}`
+              : result.subscriptionTitle
           })
           return newResults
         })
@@ -519,7 +562,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
     }
   }
 
-  // 取消验活
+  // 取消探测
   const handleCancelVerify = () => {
     cancelVerifyRef.current = true
     setVerifying(false)
@@ -712,7 +755,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
                 <>
                   <Button onClick={handleBatchVerify} size="sm" variant="outline">
                     <CheckCircle2 className="h-4 w-4 sm:mr-2" />
-                    <span className="hidden sm:inline">批量验活</span>
+                    <span className="hidden sm:inline">探测选中</span>
                   </Button>
                   <Button onClick={handleBatchResetFailure} size="sm" variant="outline">
                     <RotateCcw className="h-4 w-4 sm:mr-2" />
@@ -730,10 +773,21 @@ export function Dashboard({ onLogout }: DashboardProps) {
                   </Button>
                 </>
               )}
+              {data?.credentials && data.credentials.length > 0 && (
+                <Button
+                  onClick={handleProbeAll}
+                  size="sm"
+                  variant="outline"
+                  disabled={verifying}
+                >
+                  <CheckCircle2 className={`h-4 w-4 sm:mr-2 ${verifying ? 'animate-spin' : ''}`} />
+                  <span className="hidden sm:inline">全局探测</span>
+                </Button>
+              )}
               {verifying && !verifyDialogOpen && (
                 <Button onClick={() => setVerifyDialogOpen(true)} size="sm" variant="secondary">
                   <CheckCircle2 className="h-4 w-4 mr-2 animate-spin" />
-                  验活中... {verifyProgress.current}/{verifyProgress.total}
+                  探测中... {verifyProgress.current}/{verifyProgress.total}
                 </Button>
               )}
               {data?.credentials && data.credentials.length > 0 && (
@@ -872,7 +926,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
         onOpenChange={setKamImportDialogOpen}
       />
 
-      {/* 批量验活对话框 */}
+      {/* 账号探测对话框 */}
       <BatchVerifyDialog
         open={verifyDialogOpen}
         onOpenChange={setVerifyDialogOpen}

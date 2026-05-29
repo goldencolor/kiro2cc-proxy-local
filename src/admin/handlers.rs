@@ -9,8 +9,9 @@ use axum::{
 use super::{
     middleware::AdminState,
     types::{
-        AddCredentialRequest, RequestDetailsQuery, SetDisabledRequest, SetKvCacheConfigRequest,
-        SetLoadBalancingModeRequest, SetPriorityRequest, SuccessResponse, UpdateCredentialRequest,
+        AddCredentialRequest, ProbeCredentialsRequest, RequestDetailsQuery, SetAlertConfigRequest,
+        SetDisabledRequest, SetKvCacheConfigRequest, SetLoadBalancingModeRequest,
+        SetPriorityRequest, SuccessResponse, UpdateCredentialRequest,
     },
 };
 
@@ -86,6 +87,20 @@ pub async fn get_credential_balance(
         Ok(response) => Json(response).into_response(),
         Err(e) => (e.status_code(), Json(e.into_response())).into_response(),
     }
+}
+
+pub async fn probe_credential(
+    State(state): State<AdminState>,
+    Path(id): Path<u64>,
+) -> impl IntoResponse {
+    Json(state.service.probe_credential(id).await)
+}
+
+pub async fn probe_credentials(
+    State(state): State<AdminState>,
+    Json(payload): Json<ProbeCredentialsRequest>,
+) -> impl IntoResponse {
+    Json(state.service.probe_credentials(payload).await)
 }
 
 pub async fn get_request_details(
@@ -178,6 +193,20 @@ pub async fn set_kv_cache_config(
 }
 
 /// 将 API Key 脱敏显示（保留前半部分 + ***）
+pub async fn get_alert_config(State(state): State<AdminState>) -> impl IntoResponse {
+    Json(state.service.get_alert_config())
+}
+
+pub async fn set_alert_config(
+    State(state): State<AdminState>,
+    Json(payload): Json<SetAlertConfigRequest>,
+) -> impl IntoResponse {
+    match state.service.set_alert_config(payload) {
+        Ok(response) => Json(response).into_response(),
+        Err(e) => (e.status_code(), Json(e.into_response())).into_response(),
+    }
+}
+
 fn mask_key(key: &str) -> String {
     let visible = key.len() / 2;
     format!("{}***", &key[..visible])

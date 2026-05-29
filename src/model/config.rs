@@ -144,6 +144,13 @@ pub struct Config {
     #[serde(default = "default_kv_cache_ttl_secs")]
     pub kv_cache_ttl_secs: i64,
 
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wecom_webhook_url: Option<String>,
+
+    #[serde(default = "default_all_credentials_unavailable_alert_cooldown_secs")]
+    pub all_credentials_unavailable_alert_cooldown_secs: u64,
+
     /// 配置文件路径（运行时元数据，不写入 JSON）
     #[serde(skip)]
     config_path: Option<PathBuf>,
@@ -214,6 +221,10 @@ fn default_kv_cache_ttl_secs() -> i64 {
     3600
 }
 
+fn default_all_credentials_unavailable_alert_cooldown_secs() -> u64 {
+    1800
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -246,6 +257,9 @@ impl Default for Config {
             max_total_retries: default_max_total_retries(),
             cache_read_efficiency: default_cache_read_efficiency(),
             kv_cache_ttl_secs: default_kv_cache_ttl_secs(),
+            wecom_webhook_url: None,
+            all_credentials_unavailable_alert_cooldown_secs:
+                default_all_credentials_unavailable_alert_cooldown_secs(),
             config_path: None,
         }
     }
@@ -316,6 +330,12 @@ impl Config {
         }
         if self.kv_cache_ttl_secs < 60 {
             anyhow::bail!("kvCacheTtlSecs 必须至少为 60");
+        }
+        if let Some(url) = &self.wecom_webhook_url {
+            validate_wecom_webhook_url(url)?;
+        }
+        if self.all_credentials_unavailable_alert_cooldown_secs < 60 {
+            anyhow::bail!("allCredentialsUnavailableAlertCooldownSecs 必须至少为 60");
         }
         Ok(())
     }
@@ -420,6 +440,17 @@ fn validate_proxy_url(url: &str) -> anyhow::Result<()> {
 fn validate_endpoint_url(name: &str, endpoint: &str) -> anyhow::Result<()> {
     if !(endpoint.starts_with("https://") || endpoint.starts_with("http://")) {
         anyhow::bail!("{} 必须以 http:// 或 https:// 开头", name);
+    }
+    Ok(())
+}
+
+fn validate_wecom_webhook_url(url: &str) -> anyhow::Result<()> {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+    if !trimmed.starts_with("https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=") {
+        anyhow::bail!("wecomWebhookUrl 必须是企业微信群机器人 webhook 地址");
     }
     Ok(())
 }

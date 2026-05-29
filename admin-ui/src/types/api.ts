@@ -65,6 +65,26 @@ export interface BalanceResponse {
   nextResetAt: number | null
 }
 
+export interface ProbeCredentialResult {
+  id: number
+  success: boolean
+  disabled: boolean
+  durationMs: number
+  message: string
+  subscriptionTitle?: string
+  remaining?: number
+  usageLimit?: number
+  error?: string
+}
+
+export interface ProbeCredentialsResponse {
+  total: number
+  success: number
+  failed: number
+  intervalMs: number
+  results: ProbeCredentialResult[]
+}
+
 // 成功响应
 export interface RequestDetailsResponse {
   total: number

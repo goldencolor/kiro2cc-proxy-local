@@ -22,12 +22,14 @@ import {
   setAuthKeys,
   getKvCacheConfig,
   setKvCacheConfig,
+  getAlertConfig,
+  setAlertConfig,
   getRequestDetails,
   clearRequestDetails,
   getCredentialUsageRecords,
   getApiKeyUsageRecords,
 } from '@/api/credentials'
-import type { KvCacheConfig } from '@/api/credentials'
+import type { AlertConfig, KvCacheConfig } from '@/api/credentials'
 import type { AddCredentialRequest, UpdateCredentialRequest, CreateApiKeyRequest, UpdateApiKeyRequest, BalanceResponse } from '@/types/api'
 
 // 查询凭据列表
@@ -168,6 +170,23 @@ export function useSetKvCacheConfig() {
     mutationFn: (config: Partial<KvCacheConfig>) => setKvCacheConfig(config),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['kvCacheConfig'] })
+    },
+  })
+}
+
+export function useAlertConfig() {
+  return useQuery({
+    queryKey: ['alertConfig'],
+    queryFn: getAlertConfig,
+  })
+}
+
+export function useSetAlertConfig() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (config: Partial<AlertConfig>) => setAlertConfig(config),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['alertConfig'] })
     },
   })
 }
