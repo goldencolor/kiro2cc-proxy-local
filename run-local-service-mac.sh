@@ -9,7 +9,7 @@ cd "$SCRIPT_DIR"
 CONFIG_DIR="$SCRIPT_DIR/app/config"
 CONFIG_FILE="$CONFIG_DIR/config.json"
 CREDENTIALS_FILE="$CONFIG_DIR/credentials.json"
-BINARY="$SCRIPT_DIR/target/release/kiro2cc-proxy"
+BINARY="$SCRIPT_DIR/target/release/kiro-rs"
 
 echo "=================================================="
 echo "  kiro2cc-proxy startup script"
@@ -69,13 +69,8 @@ EOF
 
 if [ ! -f "$BINARY" ]; then
     echo "[!] Binary not found: $BINARY"
-    echo "[*] Building release binary..."
-    if ! command -v cargo &>/dev/null; then
-        echo "[!] cargo not found. Install Rust first: https://rustup.rs"
-        read -p "Press Enter to exit..."
-        exit 1
-    fi
-    cargo build --release
+    echo "[*] Running full build..."
+    "$SCRIPT_DIR/build-mac.sh"
 fi
 
 if [ ! -f "$CONFIG_FILE" ]; then

@@ -8,7 +8,7 @@ Set-Location $SCRIPT_DIR
 $CONFIG_DIR = "$SCRIPT_DIR\app\config"
 $CONFIG_FILE = "$CONFIG_DIR\config.json"
 $CREDENTIALS_FILE = "$CONFIG_DIR\credentials.json"
-$BINARY = "$SCRIPT_DIR\target\release\kiro2cc-proxy.exe"
+$BINARY = "$SCRIPT_DIR\target\release\kiro-rs.exe"
 
 Write-Host "=================================================="
 Write-Host "  kiro2cc-proxy startup script (Windows)"
@@ -67,13 +67,8 @@ function Setup-Config {
 
 if (-not (Test-Path $BINARY)) {
     Write-Host "[!] Binary not found: $BINARY"
-    if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
-        Write-Host "[!] cargo not found. Install Rust first: https://rustup.rs"
-        Read-Host "Press Enter to exit"
-        exit 1
-    }
-    Write-Host "[*] Building release binary..."
-    cargo build --release
+    Write-Host "[*] Running full build..."
+    & "$SCRIPT_DIR\build-windows.ps1"
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[!] Build failed"
         Read-Host "Press Enter to exit"
