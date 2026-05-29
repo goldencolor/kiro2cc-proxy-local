@@ -1722,6 +1722,40 @@ impl MultiTokenManager {
         Ok(usage_limits)
     }
 
+    /// 强制刷新指定凭据的访问 Token（Admin API）
+    pub async fn refresh_token_for(&self, id: u64) -> anyhow::Result<()> {
+        let _guard = self.refresh_lock.lock().await;
+        let current_creds = {
+            let entries = self.entries.lock();
+            entries
+                .iter()
+                .find(|e| e.id == id)
+                .map(|e| e.credentials.clone())
+                .ok_or_else(|| anyhow::anyhow!("凭据不存在: {}", id))?
+        };
+
+        if current_creds.uses_kiro_api_key(&self.config) {
+            anyhow::bail!("该凭据使用 Kiro API Key，无需刷新 Token");
+        }
+
+        let effective_proxy = current_creds.effective_proxy(self.proxy.as_ref());
+        let new_creds = refresh_token(&current_creds, &self.config, effective_proxy.as_ref()).await?;
+
+        {
+            let mut entries = self.entries.lock();
+            let entry = entries
+                .iter_mut()
+                .find(|e| e.id == id)
+                .ok_or_else(|| anyhow::anyhow!("凭据不存在: {}", id))?;
+            entry.credentials = new_creds;
+            entry.failure_count = 0;
+            entry.disabled_reason = None;
+        }
+
+        self.persist_credentials()?;
+        Ok(())
+    }
+
     /// 添加新凭据（Admin API）
     ///
     /// # 流程

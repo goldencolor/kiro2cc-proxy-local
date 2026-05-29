@@ -82,6 +82,13 @@ export async function resetCredentialFailure(
   return data
 }
 
+export async function refreshCredentialToken(
+  id: number
+): Promise<SuccessResponse> {
+  const { data } = await api.post<SuccessResponse>(`/credentials/${id}/refresh-token`)
+  return data
+}
+
 // 获取凭据余额
 export async function getCredentialBalance(id: number): Promise<BalanceResponse> {
   const { data } = await api.get<BalanceResponse>(`/credentials/${id}/balance`)

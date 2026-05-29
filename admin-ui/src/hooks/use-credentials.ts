@@ -4,6 +4,7 @@ import {
   setCredentialDisabled,
   setCredentialPriority,
   resetCredentialFailure,
+  refreshCredentialToken,
   getCredentialBalance,
   addCredential,
   deleteCredential,
@@ -89,6 +90,7 @@ export function useSetPriority() {
       setCredentialPriority(id, priority),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['credentials'] })
+      queryClient.refetchQueries({ queryKey: ['credentials'] })
     },
   })
 }
@@ -98,6 +100,16 @@ export function useResetFailure() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (id: number) => resetCredentialFailure(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['credentials'] })
+    },
+  })
+}
+
+export function useRefreshCredentialToken() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => refreshCredentialToken(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['credentials'] })
     },

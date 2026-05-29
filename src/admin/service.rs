@@ -291,6 +291,13 @@ impl AdminService {
         }
     }
 
+    pub async fn refresh_token(&self, id: u64) -> Result<(), AdminServiceError> {
+        self.token_manager
+            .refresh_token_for(id)
+            .await
+            .map_err(|e| self.classify_error(e, id))
+    }
+
     pub async fn probe_credentials(
         &self,
         req: ProbeCredentialsRequest,

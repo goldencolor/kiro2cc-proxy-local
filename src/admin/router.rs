@@ -15,7 +15,7 @@ use super::{
         add_credential, clear_request_details, delete_credential, export_credentials,
         get_alert_config, get_all_credentials, get_auth_keys, get_credential_balance,
         get_kv_cache_config, get_load_balancing_mode, get_request_details, probe_credential,
-        probe_credentials, reset_failure_count, set_alert_config, set_auth_keys,
+        probe_credentials, refresh_credential_token, reset_failure_count, set_alert_config, set_auth_keys,
         set_credential_disabled, set_credential_priority, set_kv_cache_config,
         set_load_balancing_mode,
         update_credential,
@@ -40,6 +40,7 @@ pub fn create_admin_router(state: AdminState) -> Router {
         .route("/credentials/{id}/disabled", post(set_credential_disabled))
         .route("/credentials/{id}/priority", post(set_credential_priority))
         .route("/credentials/{id}/reset", post(reset_failure_count))
+        .route("/credentials/{id}/refresh-token", post(refresh_credential_token))
         .route("/credentials/{id}/balance", get(get_credential_balance))
         .route("/credentials/{id}/probe", post(probe_credential))
         .route("/credentials/{id}/usage", get(get_credential_usage))

@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { RefreshCw, ChevronUp, ChevronDown, Wallet, Trash2, Loader2, Pencil, FileText } from 'lucide-react'
+import { RefreshCw, ChevronUp, ChevronDown, Wallet, Trash2, Loader2, Pencil, FileText, KeyRound } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Progress } from '@/components/ui/progress'
 import {
   Dialog,
   DialogContent,
@@ -20,6 +21,7 @@ import {
   useSetDisabled,
   useSetPriority,
   useResetFailure,
+  useRefreshCredentialToken,
   useDeleteCredential,
 } from '@/hooks/use-credentials'
 import { EditCredentialDialog } from './edit-credential-dialog'
@@ -51,6 +53,15 @@ function formatLastUsed(lastUsedAt: string | null): string {
   return `${days} 天前`
 }
 
+function formatBalanceNumber(num: number) {
+  return num.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+function formatResetDate(timestamp: number | null) {
+  if (!timestamp) return '未知'
+  return new Date(timestamp * 1000).toLocaleString('zh-CN')
+}
+
 export function CredentialCard({
   credential,
   onViewBalance,
@@ -69,6 +80,7 @@ export function CredentialCard({
   const setDisabled = useSetDisabled()
   const setPriority = useSetPriority()
   const resetFailure = useResetFailure()
+  const refreshToken = useRefreshCredentialToken()
   const deleteCredential = useDeleteCredential()
 
   const handleToggleDisabled = () => {
@@ -113,6 +125,13 @@ export function CredentialCard({
       onError: (err) => {
         toast.error('操作失败: ' + (err as Error).message)
       },
+    })
+  }
+
+  const handleRefreshToken = () => {
+    refreshToken.mutate(credential.id, {
+      onSuccess: (res) => toast.success(res.message),
+      onError: (err) => toast.error('刷新 Token 失败: ' + (err as Error).message),
     })
   }
 
@@ -248,12 +267,28 @@ export function CredentialCard({
                   <Loader2 className="inline w-3 h-3 animate-spin" /> 加载中...
                 </span>
               ) : balance ? (
-                <span className="font-medium ml-1">
-                  {balance.remaining.toFixed(2)} / {balance.usageLimit.toFixed(2)}
-                  <span className="text-xs text-muted-foreground ml-1">
-                    ({(100 - balance.usagePercentage).toFixed(1)}% 剩余)
-                  </span>
-                </span>
+                <div className="mt-2 rounded-md border bg-muted/20 p-3">
+                  <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                    <span>已使用 ${formatBalanceNumber(balance.currentUsage)}</span>
+                    <span>限额 ${formatBalanceNumber(balance.usageLimit)}</span>
+                  </div>
+                  <Progress value={balance.usagePercentage} className="mt-2 h-2" />
+                  <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <span className="text-muted-foreground">剩余 </span>
+                      <span className="font-semibold text-green-600">
+                        ${formatBalanceNumber(balance.remaining)}
+                      </span>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-muted-foreground">已用 </span>
+                      <span className="font-medium">{balance.usagePercentage.toFixed(1)}%</span>
+                    </div>
+                    <div className="col-span-2 text-muted-foreground">
+                      下次重置：{formatResetDate(balance.nextResetAt)}
+                    </div>
+                  </div>
+                </div>
               ) : (
                 <span className="text-sm text-muted-foreground ml-1">未知</span>
               )}
@@ -272,12 +307,14 @@ export function CredentialCard({
           </div>
 
           {/* 操作按钮 */}
-          <div className="flex flex-wrap gap-2 pt-2 border-t">
+          <div className="space-y-2 pt-2 border-t">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
             <Button
               size="sm"
               variant="outline"
               onClick={handleReset}
               disabled={resetFailure.isPending || credential.failureCount === 0}
+              className="justify-center"
             >
               <RefreshCw className="h-4 w-4 mr-1" />
               重置失败
@@ -296,6 +333,7 @@ export function CredentialCard({
                 )
               }}
               disabled={setPriority.isPending || credential.priority === 0}
+              className="justify-center"
             >
               <ChevronUp className="h-4 w-4 mr-1" />
               提高优先级
@@ -314,10 +352,13 @@ export function CredentialCard({
                 )
               }}
               disabled={setPriority.isPending}
+              className="justify-center"
             >
               <ChevronDown className="h-4 w-4 mr-1" />
               降低优先级
             </Button>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
             <Button
               size="sm"
               variant="default"
@@ -332,7 +373,22 @@ export function CredentialCard({
               onClick={() => onViewLog(credential.id)}
               title="查看使用日志"
             >
-              <FileText className="h-4 w-4" />
+              <FileText className="h-4 w-4 mr-1" />
+              日志
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleRefreshToken}
+              disabled={refreshToken.isPending || credential.hasKiroApiKey}
+              title={credential.hasKiroApiKey ? 'Kiro API Key 凭据无需刷新 Token' : undefined}
+            >
+              {refreshToken.isPending ? (
+                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+              ) : (
+                <KeyRound className="h-4 w-4 mr-1" />
+              )}
+              刷新 Token
             </Button>
             <Button
               size="sm"
@@ -352,6 +408,7 @@ export function CredentialCard({
               <Trash2 className="h-4 w-4 mr-1" />
               删除
             </Button>
+            </div>
           </div>
         </CardContent>
       </Card>

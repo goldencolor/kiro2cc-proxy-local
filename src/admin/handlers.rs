@@ -96,6 +96,16 @@ pub async fn probe_credential(
     Json(state.service.probe_credential(id).await)
 }
 
+pub async fn refresh_credential_token(
+    State(state): State<AdminState>,
+    Path(id): Path<u64>,
+) -> impl IntoResponse {
+    match state.service.refresh_token(id).await {
+        Ok(_) => Json(SuccessResponse::new(format!("凭据 #{} Token 已刷新", id))).into_response(),
+        Err(e) => (e.status_code(), Json(e.into_response())).into_response(),
+    }
+}
+
 pub async fn probe_credentials(
     State(state): State<AdminState>,
     Json(payload): Json<ProbeCredentialsRequest>,

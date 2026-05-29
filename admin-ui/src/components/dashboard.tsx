@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { RefreshCw, LogOut, Moon, Sun, Server, Plus, Upload, FileUp, Trash2, RotateCcw, CheckCircle2, Key, Settings, ListTree, Download, Database } from 'lucide-react'
+import { RefreshCw, LogOut, Moon, Sun, Server, Plus, Upload, FileUp, Trash2, RotateCcw, CheckCircle2, Key, Settings, ListTree, Download, Database, CheckSquare } from 'lucide-react'
 const kiroIcon = '/admin/kiro-icon.png'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -70,8 +70,14 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const totalPages = Math.ceil((data?.credentials.length || 0) / itemsPerPage)
   const startIndex = (currentPage - 1) * itemsPerPage
   const endIndex = startIndex + itemsPerPage
-  const currentCredentials = data?.credentials.slice(startIndex, endIndex) || []
+  const sortedCredentials = [...(data?.credentials || [])].sort((a, b) => {
+    if (a.priority !== b.priority) return a.priority - b.priority
+    return a.id - b.id
+  })
+  const currentCredentials = sortedCredentials.slice(startIndex, endIndex)
   const disabledCredentialCount = data?.credentials.filter(credential => credential.disabled).length || 0
+  const allCredentialIds = sortedCredentials.map(credential => credential.id)
+  const allSelected = allCredentialIds.length > 0 && allCredentialIds.every(id => selectedIds.has(id))
   const selectedDisabledCount = Array.from(selectedIds).filter(id => {
     const credential = data?.credentials.find(c => c.id === id)
     return Boolean(credential?.disabled)
@@ -245,6 +251,10 @@ export function Dashboard({ onLogout }: DashboardProps) {
 
   const deselectAll = () => {
     setSelectedIds(new Set())
+  }
+
+  const selectAll = () => {
+    setSelectedIds(new Set(allCredentialIds))
   }
 
   // 批量删除（仅删除已禁用项）
@@ -738,11 +748,17 @@ export function Dashboard({ onLogout }: DashboardProps) {
         {/* 凭据列表 */}
         <div className="space-y-4">
           {detailCredentialId === null && (
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+            <div className="flex flex-wrap items-center gap-3">
               <h2 className="text-xl font-semibold">凭据管理</h2>
+              {data?.credentials && data.credentials.length > 0 && (
+                <Button onClick={allSelected ? deselectAll : selectAll} size="sm" variant="outline">
+                  <CheckSquare className="h-4 w-4 sm:mr-2" />
+                  <span className="hidden sm:inline">{allSelected ? '取消全选' : '全选'}</span>
+                </Button>
+              )}
               {selectedIds.size > 0 && (
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <Badge variant="secondary">已选择 {selectedIds.size} 个</Badge>
                   <Button onClick={deselectAll} size="sm" variant="ghost">
                     取消选择
@@ -750,9 +766,9 @@ export function Dashboard({ onLogout }: DashboardProps) {
                 </div>
               )}
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap items-center gap-2 xl:justify-end">
               {selectedIds.size > 0 && (
-                <>
+                <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 p-1.5">
                   <Button onClick={handleBatchVerify} size="sm" variant="outline">
                     <CheckCircle2 className="h-4 w-4 sm:mr-2" />
                     <span className="hidden sm:inline">探测选中</span>
@@ -771,7 +787,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
                     <Trash2 className="h-4 w-4 sm:mr-2" />
                     <span className="hidden sm:inline">批量删除</span>
                   </Button>
-                </>
+                </div>
               )}
               {data?.credentials && data.credentials.length > 0 && (
                 <Button
