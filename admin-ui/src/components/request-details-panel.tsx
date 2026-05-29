@@ -300,10 +300,10 @@ export function RequestDetailsPanel() {
                 <div><span className="text-muted-foreground">客户端：</span>{selectedRecord.clientIp ?? '-'}</div>
                 <div><span className="text-muted-foreground">Token：</span>{formatTokens(selectedRecord.inputTokens + selectedRecord.cachedTokens)} / {formatTokens(selectedRecord.outputTokens)}</div>
               </div>
-              {selectedRecord.requestBody || selectedRecord.responseBody ? (
+              {selectedRecord.requestBody != null || selectedRecord.responseBody != null ? (
                 <div className="space-y-4">
-                  {selectedRecord.requestBody && <JsonBlock title="请求 JSON" value={selectedRecord.requestBody} />}
-                  {selectedRecord.responseBody && <JsonBlock title="响应 JSON" value={selectedRecord.responseBody} />}
+                  {selectedRecord.requestBody != null && <JsonBlock title="请求 JSON" value={selectedRecord.requestBody} />}
+                  {selectedRecord.responseBody != null && <JsonBlock title="响应 JSON" value={selectedRecord.responseBody} />}
                 </div>
               ) : (
                 <div className="rounded-md border bg-muted/30 p-4 text-sm text-muted-foreground">
