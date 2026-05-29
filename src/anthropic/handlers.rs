@@ -879,6 +879,13 @@ async fn handle_non_stream_request(
     let response = match provider.call_api(request_body, pinned_credential_id).await {
         Ok(resp) => resp,
         Err(e) => {
+            record_failed_request_detail(
+                request_detail_input,
+                e.to_string(),
+                client_ip,
+                pinned_credential_id,
+                started_at.elapsed().as_millis(),
+            );
             return map_provider_error_with_context(
                 e,
                 "/v1/messages",

@@ -37,6 +37,8 @@ struct KvCacheRecordRow {
     endpoint: String,
     model: String,
     #[serde(default)]
+    cache_key: String,
+    #[serde(default)]
     credential_id: u64,
     stream: bool,
     cache_hit: bool,
@@ -92,9 +94,10 @@ impl AdminService {
         let cache_path = token_manager
             .cache_dir()
             .map(|d| d.join("kiro_balance_cache.json"));
-        let cache_dir = token_manager
-            .cache_dir()
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+        // Request details are written by the Anthropic handlers via kv_cache with
+        // the process current directory as the default. Read from the same place
+        // so Admin "request details" sees every recorded request.
+        let cache_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let request_details_path = cache_dir.join(KV_CACHE_RECORDS_FILE);
 
         let balance_cache = Self::load_balance_cache_from(&cache_path);
@@ -619,6 +622,28 @@ impl AdminService {
                 tracing::warn!("解析请求明细第 {} 行失败: 空或无效 JSON", line_no + 1);
             }
         }
+
+        let detailed_cache_keys = rows
+            .iter()
+            .filter(|row| {
+                row.status.is_some()
+                    || row.latency_ms.is_some()
+                    || row.client_ip.is_some()
+                    || row.request_body.is_some()
+                    || row.response_body.is_some()
+            })
+            .filter(|row| !row.cache_key.is_empty())
+            .map(|row| row.cache_key.clone())
+            .collect::<std::collections::HashSet<_>>();
+
+        rows.retain(|row| {
+            let is_preflight_row = row.status.is_none()
+                && row.latency_ms.is_none()
+                && row.client_ip.is_none()
+                && row.request_body.is_none()
+                && row.response_body.is_none();
+            !(is_preflight_row && detailed_cache_keys.contains(&row.cache_key))
+        });
 
         let total = rows.len();
         let records = rows
