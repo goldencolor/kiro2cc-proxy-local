@@ -142,6 +142,7 @@ export async function setLoadBalancingMode(mode: 'priority' | 'balanced'): Promi
 export interface KvCacheConfig {
   cacheReadEfficiency: number
   kvCacheTtlSecs: number
+  recordRequestPayloads: boolean
 }
 
 export interface AlertConfig {

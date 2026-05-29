@@ -48,6 +48,16 @@ struct KvCacheRecordRow {
     credits_used: f64,
     #[serde(default)]
     special_settings: Vec<String>,
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    latency_ms: Option<u128>,
+    #[serde(default)]
+    client_ip: Option<String>,
+    #[serde(default)]
+    request_body: Option<serde_json::Value>,
+    #[serde(default)]
+    response_body: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -444,6 +454,7 @@ impl AdminService {
         KvCacheConfigResponse {
             cache_read_efficiency: crate::anthropic::kv_cache::get_cache_read_efficiency(),
             kv_cache_ttl_secs: crate::anthropic::kv_cache::get_kv_cache_ttl_secs(),
+            record_request_payloads: crate::anthropic::kv_cache::get_record_request_payloads(),
         }
     }
 
@@ -466,6 +477,9 @@ impl AdminService {
         if let Some(ttl) = req.kv_cache_ttl_secs {
             config.kv_cache_ttl_secs = ttl.max(60);
         }
+        if let Some(enabled) = req.record_request_payloads {
+            config.record_request_payloads = enabled;
+        }
 
         config
             .save()
@@ -473,11 +487,13 @@ impl AdminService {
         crate::anthropic::kv_cache::set_kv_cache_config(
             config.cache_read_efficiency,
             config.kv_cache_ttl_secs,
+            config.record_request_payloads,
         );
 
         Ok(KvCacheConfigResponse {
             cache_read_efficiency: config.cache_read_efficiency,
             kv_cache_ttl_secs: config.kv_cache_ttl_secs,
+            record_request_payloads: config.record_request_payloads,
         })
     }
 
@@ -532,8 +548,8 @@ impl AdminService {
 
         Ok(AlertConfigResponse {
             wecom_webhook_url: config.wecom_webhook_url,
-            all_credentials_unavailable_alert_cooldown_secs:
-                config.all_credentials_unavailable_alert_cooldown_secs,
+            all_credentials_unavailable_alert_cooldown_secs: config
+                .all_credentials_unavailable_alert_cooldown_secs,
         })
     }
 
@@ -609,9 +625,9 @@ impl AdminService {
     }
 
     pub fn clear_request_details(&self) -> Result<(), AdminServiceError> {
-        File::create(&self.request_details_path).map(|_| ()).map_err(|e| {
-            AdminServiceError::InternalError(format!("清空请求明细文件失败: {}", e))
-        })
+        File::create(&self.request_details_path)
+            .map(|_| ())
+            .map_err(|e| AdminServiceError::InternalError(format!("清空请求明细文件失败: {}", e)))
     }
 
     fn map_request_detail(row: KvCacheRecordRow) -> RequestDetailItem {
@@ -654,6 +670,11 @@ impl AdminService {
                 0.0
             },
             special_settings: row.special_settings,
+            status: row.status,
+            latency_ms: row.latency_ms,
+            client_ip: row.client_ip,
+            request_body: row.request_body,
+            response_body: row.response_body,
         }
     }
 

@@ -150,6 +150,7 @@ async fn main() {
     anthropic::kv_cache::set_kv_cache_config(
         config.cache_read_efficiency,
         config.kv_cache_ttl_secs,
+        config.record_request_payloads,
     );
     alert::set_wecom_webhook_config(
         config.wecom_webhook_url.clone(),

@@ -4,12 +4,14 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 
 use serde_json::json;
 use uuid::Uuid;
 
 use crate::cache::PromptCacheUsage;
 
+use super::kv_cache::{KvCacheRecordInput, record_request_detail};
 use crate::kiro::model::events::Event;
 use crate::model::usage::UsageTracker;
 
@@ -538,6 +540,9 @@ pub struct StreamContext {
     metering_credits: Option<f64>,
     /// 模拟出的 prompt cache usage
     prompt_cache_usage: PromptCacheUsage,
+    request_detail_input: Option<KvCacheRecordInput>,
+    started_at: Instant,
+    error_status: Option<String>,
 }
 
 impl StreamContext {
@@ -568,12 +573,20 @@ impl StreamContext {
             client_ip: None,
             metering_credits: None,
             prompt_cache_usage: PromptCacheUsage::uncached(input_tokens),
+            request_detail_input: None,
+            started_at: Instant::now(),
+            error_status: None,
         }
     }
 
     /// 设置 prompt cache usage
     pub fn with_prompt_cache_usage(mut self, usage: PromptCacheUsage) -> Self {
         self.prompt_cache_usage = usage;
+        self
+    }
+
+    pub fn with_request_detail(mut self, input: KvCacheRecordInput) -> Self {
+        self.request_detail_input = Some(input);
         self
     }
 
@@ -688,6 +701,7 @@ impl StreamContext {
                 error_code,
                 error_message,
             } => {
+                self.error_status = Some(format!("{}: {}", error_code, error_message));
                 tracing::error!("收到错误事件: {} - {}", error_code, error_message);
                 Vec::new()
             }
@@ -695,6 +709,7 @@ impl StreamContext {
                 exception_type,
                 message,
             } => {
+                self.error_status = Some(format!("{}: {}", exception_type, message));
                 // 处理 ContentLengthExceededException
                 if exception_type == "ContentLengthExceededException" {
                     self.state_manager.set_stop_reason("max_tokens");
@@ -1204,6 +1219,20 @@ impl StreamContext {
 
         // 生成最终事件（含修正后的缓存模拟字段）
         let usage = self.prompt_cache_usage.scale_to(final_input_tokens);
+        if let Some(mut detail) = self.request_detail_input.take() {
+            detail.input_tokens = final_input_tokens;
+            detail.output_tokens = self.output_tokens;
+            detail.credits_used = self.metering_credits.unwrap_or(0.0);
+            detail.status = Some(
+                self.error_status
+                    .clone()
+                    .unwrap_or_else(|| "200".to_string()),
+            );
+            detail.latency_ms = Some(self.started_at.elapsed().as_millis());
+            detail.client_ip = self.client_ip.clone();
+            detail.credential_id = self.credential_id;
+            record_request_detail(None, detail);
+        }
         events.extend(self.state_manager.generate_final_events(
             usage.input_tokens,
             reported_output_tokens,
@@ -1268,6 +1297,11 @@ impl BufferedStreamContext {
 
     pub fn with_prompt_cache_usage(mut self, usage: PromptCacheUsage) -> Self {
         self.inner = self.inner.with_prompt_cache_usage(usage);
+        self
+    }
+
+    pub fn with_request_detail(mut self, input: KvCacheRecordInput) -> Self {
+        self.inner = self.inner.with_request_detail(input);
         self
     }
 

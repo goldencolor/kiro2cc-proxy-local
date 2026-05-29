@@ -56,6 +56,12 @@ pub struct KvCacheRecordInput {
     pub credits_used: f64,
     /// 本次请求触发的特殊设置（用于审计）
     pub special_settings: Vec<String>,
+    pub credential_id: Option<u64>,
+    pub status: Option<String>,
+    pub latency_ms: Option<u128>,
+    pub client_ip: Option<String>,
+    pub request_body: Option<serde_json::Value>,
+    pub response_body: Option<serde_json::Value>,
 }
 
 /// 模拟 KV cache 的命中结果（用于写入记录文件，以及回填到 API usage 字段）
@@ -87,14 +93,24 @@ struct KvInMemoryState {
 
 static KV_STATE: OnceLock<Mutex<KvInMemoryState>> = OnceLock::new();
 static KV_RECORDS_WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-static KV_CONFIG: OnceLock<Mutex<(f64, i64)>> = OnceLock::new();
+static KV_CONFIG: OnceLock<Mutex<(f64, i64, bool)>> = OnceLock::new();
 
 /// 设置 KV cache 的运行时配置（可多次调用，后续调用会更新值）
-pub fn set_kv_cache_config(cache_read_efficiency: f64, kv_cache_ttl_secs: i64) {
-    let val = (cache_read_efficiency.clamp(0.0, 1.0), kv_cache_ttl_secs.max(60));
+pub fn set_kv_cache_config(
+    cache_read_efficiency: f64,
+    kv_cache_ttl_secs: i64,
+    record_request_payloads: bool,
+) {
+    let val = (
+        cache_read_efficiency.clamp(0.0, 1.0),
+        kv_cache_ttl_secs.max(60),
+        record_request_payloads,
+    );
     match KV_CONFIG.get() {
         Some(lock) => *lock.lock() = val,
-        None => { let _ = KV_CONFIG.set(Mutex::new(val)); }
+        None => {
+            let _ = KV_CONFIG.set(Mutex::new(val));
+        }
     }
 }
 
@@ -104,6 +120,10 @@ pub fn get_cache_read_efficiency() -> f64 {
 
 pub fn get_kv_cache_ttl_secs() -> i64 {
     KV_CONFIG.get().map(|l| l.lock().1).unwrap_or(3600)
+}
+
+pub fn get_record_request_payloads() -> bool {
+    KV_CONFIG.get().map(|l| l.lock().2).unwrap_or(false)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -122,6 +142,18 @@ struct KvCacheRecord {
     output_tokens: i32,
     credits_used: f64,
     special_settings: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    credential_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    latency_ms: Option<u128>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    client_ip: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    request_body: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response_body: Option<serde_json::Value>,
 }
 
 fn resolve_cache_dir(dir_hint: Option<PathBuf>) -> PathBuf {
@@ -367,6 +399,12 @@ fn record_impl(
             0.0
         },
         special_settings,
+        credential_id: input.credential_id,
+        status: input.status,
+        latency_ms: input.latency_ms,
+        client_ip: input.client_ip,
+        request_body: None,
+        response_body: None,
     };
     append_record(&records_path, &record)?;
 
@@ -579,5 +617,53 @@ pub fn record_simulated_kv_cache(
             tracing::warn!("记录模拟 KV 缓存失败: {}", err);
             fallback
         }
+    }
+}
+
+/// Record a request detail row without applying KV-cache eligibility filtering.
+///
+/// This keeps the Admin "request details" view complete even for small prompts
+/// that are intentionally skipped by the KV-cache simulator.
+pub fn record_request_detail(cache_dir_hint: Option<PathBuf>, input: KvCacheRecordInput) {
+    let record_payloads = get_record_request_payloads();
+    let record = KvCacheRecord {
+        recorded_at: Utc::now().to_rfc3339(),
+        request_id: Uuid::new_v4().to_string(),
+        endpoint: input.endpoint.to_string(),
+        model: input.model,
+        stream: input.stream,
+        cache_key: cache_key_for(&input.prompt_hashes),
+        cache_hit: false,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+        input_tokens: input.input_tokens.max(0),
+        output_tokens: input.output_tokens.max(0),
+        credits_used: if input.credits_used.is_finite() {
+            input.credits_used.max(0.0)
+        } else {
+            0.0
+        },
+        special_settings: input
+            .special_settings
+            .into_iter()
+            .filter_map(|s| {
+                let trimmed = s.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                }
+            })
+            .collect(),
+        credential_id: input.credential_id,
+        status: input.status,
+        latency_ms: input.latency_ms,
+        client_ip: input.client_ip,
+        request_body: record_payloads.then_some(input.request_body).flatten(),
+        response_body: record_payloads.then_some(input.response_body).flatten(),
+    };
+
+    if let Err(err) = append_record(&records_file_path(cache_dir_hint), &record) {
+        tracing::warn!("记录请求明细失败: {}", err);
     }
 }

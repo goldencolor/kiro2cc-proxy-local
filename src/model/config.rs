@@ -145,6 +145,9 @@ pub struct Config {
     pub kv_cache_ttl_secs: i64,
 
     #[serde(default)]
+    pub record_request_payloads: bool,
+
+    #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wecom_webhook_url: Option<String>,
 
@@ -257,6 +260,7 @@ impl Default for Config {
             max_total_retries: default_max_total_retries(),
             cache_read_efficiency: default_cache_read_efficiency(),
             kv_cache_ttl_secs: default_kv_cache_ttl_secs(),
+            record_request_payloads: false,
             wecom_webhook_url: None,
             all_credentials_unavailable_alert_cooldown_secs:
                 default_all_credentials_unavailable_alert_cooldown_secs(),

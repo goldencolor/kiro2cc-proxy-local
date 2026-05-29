@@ -4,6 +4,7 @@ import { AlertTriangle, Bell, KeyRound, Network, Save, Timer, Zap } from 'lucide
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
 import {
   useAlertConfig,
   useAuthKeys,
@@ -32,11 +33,13 @@ export function SettingsPanel() {
   const [editingAdminApiKey, setEditingAdminApiKey] = useState(false)
   const [cacheEfficiencyDraft, setCacheEfficiencyDraft] = useState<number | null>(null)
   const [cacheTtlDraft, setCacheTtlDraft] = useState<number | null>(null)
+  const [recordPayloadsDraft, setRecordPayloadsDraft] = useState<boolean | null>(null)
   const [wecomWebhookUrl, setWecomWebhookUrl] = useState('')
   const [alertCooldown, setAlertCooldown] = useState(1800)
 
   const cacheEfficiency = cacheEfficiencyDraft ?? Math.round((kvCacheConfig?.cacheReadEfficiency ?? 0.87) * 100)
   const cacheTtl = cacheTtlDraft ?? kvCacheConfig?.kvCacheTtlSecs ?? 3600
+  const recordPayloads = recordPayloadsDraft ?? kvCacheConfig?.recordRequestPayloads ?? false
 
   useEffect(() => {
     if (!alertConfig) return
@@ -234,6 +237,13 @@ export function SettingsPanel() {
                 <span className="whitespace-nowrap text-sm text-muted-foreground">秒</span>
               </div>
             </div>
+            <div className="flex items-center justify-between gap-4 rounded-md border p-3">
+              <div className="space-y-1">
+                <span className="text-sm font-medium">记录完整请求详情</span>
+                <p className="text-xs text-muted-foreground">开启后会保存请求和响应 JSON</p>
+              </div>
+              <Switch checked={recordPayloads} onCheckedChange={setRecordPayloadsDraft} />
+            </div>
             <Button
               size="sm"
               disabled={isSettingKvCache}
@@ -241,11 +251,13 @@ export function SettingsPanel() {
                 setKvCacheConfig({
                   cacheReadEfficiency: cacheEfficiency / 100,
                   kvCacheTtlSecs: Math.max(60, cacheTtl),
+                  recordRequestPayloads: recordPayloads,
                 }, {
                   onSuccess: () => {
                     toast.success('KV Cache 配置已保存')
                     setCacheEfficiencyDraft(null)
                     setCacheTtlDraft(null)
+                    setRecordPayloadsDraft(null)
                   },
                   onError: (e) => toast.error(extractErrorMessage(e)),
                 })

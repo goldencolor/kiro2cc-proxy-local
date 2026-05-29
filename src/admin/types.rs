@@ -307,6 +307,11 @@ pub struct RequestDetailItem {
     pub cost_usd: f64,
     pub credits_used: f64,
     pub special_settings: Vec<String>,
+    pub status: Option<String>,
+    pub latency_ms: Option<u128>,
+    pub client_ip: Option<String>,
+    pub request_body: Option<serde_json::Value>,
+    pub response_body: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -314,6 +319,7 @@ pub struct RequestDetailItem {
 pub struct KvCacheConfigResponse {
     pub cache_read_efficiency: f64,
     pub kv_cache_ttl_secs: i64,
+    pub record_request_payloads: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -321,6 +327,7 @@ pub struct KvCacheConfigResponse {
 pub struct SetKvCacheConfigRequest {
     pub cache_read_efficiency: Option<f64>,
     pub kv_cache_ttl_secs: Option<i64>,
+    pub record_request_payloads: Option<bool>,
 }
 
 /// 设置负载均衡模式请求

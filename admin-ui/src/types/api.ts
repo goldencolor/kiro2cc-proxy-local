@@ -106,6 +106,11 @@ export interface RequestDetailItem {
   costUsd: number
   creditsUsed: number
   specialSettings: string[]
+  status?: string
+  latencyMs?: number
+  clientIp?: string
+  requestBody?: unknown
+  responseBody?: unknown
 }
 
 export interface SuccessResponse {

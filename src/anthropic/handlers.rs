@@ -18,14 +18,14 @@ use bytes::Bytes;
 use futures::{Stream, StreamExt, stream};
 use serde_json::json;
 use std::net::SocketAddr;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::time::interval;
 use uuid::Uuid;
 
 use super::converter::{ConversionError, convert_request};
 use super::failure_prompt_log;
 use super::kv_cache::{
-    KvCacheRecordInput, build_prompt_hashes, estimate_prompt_block_tokens,
+    KvCacheRecordInput, build_prompt_hashes, estimate_prompt_block_tokens, record_request_detail,
     record_simulated_kv_cache,
 };
 use super::middleware::{ApiKeyContext, AppState};
@@ -42,7 +42,8 @@ fn build_kv_prompt_cache_usage(
     input_tokens: i32,
 ) -> crate::cache::PromptCacheUsage {
     let prompt_hashes = build_prompt_hashes(&payload.system, &payload.messages, &payload.tools);
-    let block_tokens = estimate_prompt_block_tokens(&payload.system, &payload.messages, &payload.tools);
+    let block_tokens =
+        estimate_prompt_block_tokens(&payload.system, &payload.messages, &payload.tools);
     let kv = record_simulated_kv_cache(
         None,
         KvCacheRecordInput {
@@ -55,6 +56,12 @@ fn build_kv_prompt_cache_usage(
             output_tokens: 0,
             credits_used: 0.0,
             special_settings: Vec::new(),
+            credential_id: None,
+            status: None,
+            latency_ms: None,
+            client_ip: None,
+            request_body: None,
+            response_body: None,
         },
     );
 
@@ -67,6 +74,48 @@ fn build_kv_prompt_cache_usage(
         cache_creation_input_tokens: cache_creation,
         cache_read_input_tokens: cache_read,
     }
+}
+
+fn build_request_detail_input(
+    endpoint: &'static str,
+    payload: &MessagesRequest,
+    input_tokens: i32,
+) -> KvCacheRecordInput {
+    KvCacheRecordInput {
+        endpoint,
+        model: payload.model.clone(),
+        stream: payload.stream,
+        prompt_hashes: build_prompt_hashes(&payload.system, &payload.messages, &payload.tools),
+        block_tokens: estimate_prompt_block_tokens(
+            &payload.system,
+            &payload.messages,
+            &payload.tools,
+        ),
+        input_tokens,
+        output_tokens: 0,
+        credits_used: 0.0,
+        special_settings: Vec::new(),
+        credential_id: None,
+        status: None,
+        latency_ms: None,
+        client_ip: None,
+        request_body: serde_json::to_value(payload).ok(),
+        response_body: None,
+    }
+}
+
+fn record_failed_request_detail(
+    mut input: KvCacheRecordInput,
+    status: impl Into<String>,
+    client_ip: Option<String>,
+    credential_id: Option<u64>,
+    latency_ms: u128,
+) {
+    input.status = Some(status.into());
+    input.client_ip = client_ip;
+    input.credential_id = credential_id;
+    input.latency_ms = Some(latency_ms);
+    record_request_detail(None, input);
 }
 
 /// GET /v1/ping
@@ -574,6 +623,7 @@ pub async fn post_messages(
     let usage_tracker = state.usage_tracker.clone();
 
     let prompt_cache_usage = build_kv_prompt_cache_usage("/v1/messages", &payload, input_tokens);
+    let request_detail_input = build_request_detail_input("/v1/messages", &payload, input_tokens);
 
     if payload.stream {
         // 流式响应
@@ -586,6 +636,7 @@ pub async fn post_messages(
             usage_tracker,
             api_key_id,
             prompt_cache_usage,
+            request_detail_input,
             pinned_credential_id,
             client_ip,
         )
@@ -600,6 +651,7 @@ pub async fn post_messages(
             usage_tracker,
             api_key_id,
             prompt_cache_usage,
+            request_detail_input,
             pinned_credential_id,
             client_ip,
         )
@@ -617,22 +669,40 @@ async fn handle_stream_request(
     usage_tracker: Option<std::sync::Arc<crate::model::usage::UsageTracker>>,
     api_key_id: Option<u32>,
     prompt_cache_usage: crate::cache::PromptCacheUsage,
+    request_detail_input: KvCacheRecordInput,
     pinned_credential_id: Option<u64>,
     client_ip: Option<String>,
 ) -> Response {
+    let started_at = Instant::now();
     // 调用 Kiro API（支持多凭据故障转移）
     let response = match provider
         .call_api_stream(request_body, pinned_credential_id)
         .await
     {
         Ok(resp) => resp,
-        Err(e) => return map_provider_error_with_context(e, "/v1/messages", model, request_body, input_tokens),
+        Err(e) => {
+            record_failed_request_detail(
+                request_detail_input,
+                e.to_string(),
+                client_ip,
+                pinned_credential_id,
+                started_at.elapsed().as_millis(),
+            );
+            return map_provider_error_with_context(
+                e,
+                "/v1/messages",
+                model,
+                request_body,
+                input_tokens,
+            );
+        }
     };
 
     // 创建流处理上下文
     let mut ctx = StreamContext::new_with_thinking(model, input_tokens, thinking_enabled)
         .with_usage_tracking(usage_tracker, api_key_id, pinned_credential_id, client_ip)
-        .with_prompt_cache_usage(prompt_cache_usage);
+        .with_prompt_cache_usage(prompt_cache_usage)
+        .with_request_detail(request_detail_input);
 
     // 生成初始事件
     let initial_events = ctx.generate_initial_events();
@@ -800,13 +870,23 @@ async fn handle_non_stream_request(
     usage_tracker: Option<std::sync::Arc<crate::model::usage::UsageTracker>>,
     api_key_id: Option<u32>,
     prompt_cache_usage: crate::cache::PromptCacheUsage,
+    mut request_detail_input: KvCacheRecordInput,
     pinned_credential_id: Option<u64>,
     client_ip: Option<String>,
 ) -> Response {
+    let started_at = Instant::now();
     // 调用 Kiro API（支持多凭据故障转移）
     let response = match provider.call_api(request_body, pinned_credential_id).await {
         Ok(resp) => resp,
-        Err(e) => return map_provider_error_with_context(e, "/v1/messages", model, request_body, input_tokens),
+        Err(e) => {
+            return map_provider_error_with_context(
+                e,
+                "/v1/messages",
+                model,
+                request_body,
+                input_tokens,
+            );
+        }
     };
 
     // 读取响应体
@@ -918,7 +998,10 @@ async fn handle_non_stream_request(
                                     );
                             }
                         }
-                        Event::Exception { exception_type, message } => {
+                        Event::Exception {
+                            exception_type,
+                            message,
+                        } => {
                             if exception_type == "ContentLengthExceededException" {
                                 stop_reason = "max_tokens".to_string();
                             }
@@ -975,6 +1058,12 @@ async fn handle_non_stream_request(
 
     // 缩放 cache usage 到最终 input_tokens
     let usage = prompt_cache_usage.scale_to(final_input_tokens);
+    request_detail_input.input_tokens = final_input_tokens;
+    request_detail_input.output_tokens = output_tokens;
+    request_detail_input.status = Some("200".to_string());
+    request_detail_input.latency_ms = Some(started_at.elapsed().as_millis());
+    request_detail_input.client_ip = client_ip.clone();
+    request_detail_input.credential_id = pinned_credential_id;
 
     // 记录用量（内部使用真实值）
     if let (Some(tracker), Some(key_id)) = (&usage_tracker, api_key_id) {
@@ -1005,6 +1094,9 @@ async fn handle_non_stream_request(
             "cache_read_input_tokens": usage.cache_read_input_tokens
         }
     });
+
+    request_detail_input.response_body = Some(response_body.clone());
+    record_request_detail(None, request_detail_input);
 
     (StatusCode::OK, Json(response_body)).into_response()
 }
@@ -1191,6 +1283,8 @@ pub async fn post_messages_cc(
     let usage_tracker = state.usage_tracker.clone();
 
     let prompt_cache_usage = build_kv_prompt_cache_usage("/cc/v1/messages", &payload, input_tokens);
+    let request_detail_input =
+        build_request_detail_input("/cc/v1/messages", &payload, input_tokens);
 
     if payload.stream {
         // 流式响应（缓冲模式）
@@ -1203,6 +1297,7 @@ pub async fn post_messages_cc(
             usage_tracker.clone(),
             api_key_id,
             prompt_cache_usage,
+            request_detail_input,
             pinned_credential_id,
             client_ip.clone(),
         )
@@ -1217,6 +1312,7 @@ pub async fn post_messages_cc(
             usage_tracker,
             api_key_id,
             prompt_cache_usage,
+            request_detail_input,
             pinned_credential_id,
             client_ip,
         )
@@ -1237,22 +1333,40 @@ async fn handle_stream_request_buffered(
     usage_tracker: Option<std::sync::Arc<crate::model::usage::UsageTracker>>,
     api_key_id: Option<u32>,
     prompt_cache_usage: crate::cache::PromptCacheUsage,
+    request_detail_input: KvCacheRecordInput,
     pinned_credential_id: Option<u64>,
     client_ip: Option<String>,
 ) -> Response {
+    let started_at = Instant::now();
     // 调用 Kiro API（支持多凭据故障转移）
     let response = match provider
         .call_api_stream(request_body, pinned_credential_id)
         .await
     {
         Ok(resp) => resp,
-        Err(e) => return map_provider_error_with_context(e, "/cc/v1/messages", model, request_body, estimated_input_tokens),
+        Err(e) => {
+            record_failed_request_detail(
+                request_detail_input,
+                e.to_string(),
+                client_ip,
+                pinned_credential_id,
+                started_at.elapsed().as_millis(),
+            );
+            return map_provider_error_with_context(
+                e,
+                "/cc/v1/messages",
+                model,
+                request_body,
+                estimated_input_tokens,
+            );
+        }
     };
 
     // 创建缓冲流处理上下文
     let ctx = BufferedStreamContext::new(model, estimated_input_tokens, thinking_enabled)
         .with_usage_tracking(usage_tracker, api_key_id, pinned_credential_id, client_ip)
-        .with_prompt_cache_usage(prompt_cache_usage);
+        .with_prompt_cache_usage(prompt_cache_usage)
+        .with_request_detail(request_detail_input);
 
     // 创建缓冲 SSE 流
     let stream = create_buffered_sse_stream(
