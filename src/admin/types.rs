@@ -235,6 +235,18 @@ pub struct ProbeCredentialResult {
     pub duration_ms: u128,
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub probe_prompt: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_code: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw_response: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_body: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub subscription_title: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remaining: Option<f64>,
@@ -242,6 +254,14 @@ pub struct ProbeCredentialResult {
     pub usage_limit: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ProbeCredentialRequest {
+    pub prompt: Option<String>,
+    pub model: Option<String>,
+    pub max_tokens: Option<i32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -261,6 +281,9 @@ pub struct ProbeCredentialsRequest {
     pub include_disabled: bool,
     #[serde(default = "default_probe_interval_ms")]
     pub interval_ms: u64,
+    pub prompt: Option<String>,
+    pub model: Option<String>,
+    pub max_tokens: Option<i32>,
 }
 
 fn default_probe_interval_ms() -> u64 {

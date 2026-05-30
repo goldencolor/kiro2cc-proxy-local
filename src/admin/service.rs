@@ -11,16 +11,24 @@ use chrono::Utc;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
+use crate::anthropic::converter::convert_request;
+use crate::anthropic::types::{Message, MessagesRequest};
+use crate::http_client::ProxyConfig;
 use crate::kiro::model::credentials::KiroCredentials;
+use crate::kiro::model::events::Event;
+use crate::kiro::model::requests::kiro::KiroRequest;
+use crate::kiro::parser::decoder::EventStreamDecoder;
+use crate::kiro::provider::KiroProvider;
 use crate::kiro::token_manager::MultiTokenManager;
 
 use super::error::AdminServiceError;
 use super::types::{
     AddCredentialRequest, AddCredentialResponse, AlertConfigResponse, BalanceResponse,
     CredentialStatusItem, CredentialsStatusResponse, KvCacheConfigResponse,
-    LoadBalancingModeResponse, ProbeCredentialResult, ProbeCredentialsRequest,
-    ProbeCredentialsResponse, RequestDetailItem, RequestDetailsResponse, SetAlertConfigRequest,
-    SetKvCacheConfigRequest, SetLoadBalancingModeRequest, UpdateCredentialRequest,
+    LoadBalancingModeResponse, ProbeCredentialRequest, ProbeCredentialResult,
+    ProbeCredentialsRequest, ProbeCredentialsResponse, RequestDetailItem, RequestDetailsResponse,
+    SetAlertConfigRequest, SetKvCacheConfigRequest, SetLoadBalancingModeRequest,
+    UpdateCredentialRequest,
 };
 
 /// 余额缓存过期时间（秒），5 分钟
@@ -84,13 +92,19 @@ struct CachedBalance {
 /// 封装所有 Admin API 的业务逻辑
 pub struct AdminService {
     token_manager: Arc<MultiTokenManager>,
+    proxy_config: Option<ProxyConfig>,
+    profile_arn: Option<String>,
     balance_cache: Mutex<HashMap<u64, CachedBalance>>,
     cache_path: Option<PathBuf>,
     request_details_path: PathBuf,
 }
 
 impl AdminService {
-    pub fn new(token_manager: Arc<MultiTokenManager>) -> Self {
+    pub fn new(
+        token_manager: Arc<MultiTokenManager>,
+        proxy_config: Option<ProxyConfig>,
+        profile_arn: Option<String>,
+    ) -> Self {
         let cache_path = token_manager
             .cache_dir()
             .map(|d| d.join("kiro_balance_cache.json"));
@@ -104,6 +118,8 @@ impl AdminService {
 
         Self {
             token_manager,
+            proxy_config,
+            profile_arn,
             balance_cache: Mutex::new(balance_cache),
             cache_path,
             request_details_path,
@@ -257,7 +273,11 @@ impl AdminService {
     }
 
     /// 添加新凭据
-    pub async fn probe_credential(&self, id: u64) -> ProbeCredentialResult {
+    pub async fn probe_credential(
+        &self,
+        id: u64,
+        req: ProbeCredentialRequest,
+    ) -> ProbeCredentialResult {
         let disabled = self
             .token_manager
             .snapshot()
@@ -267,25 +287,72 @@ impl AdminService {
             .map(|entry| entry.disabled)
             .unwrap_or(false);
         let started = Instant::now();
+        let prompt = req
+            .prompt
+            .unwrap_or_else(|| "Please reply with OK and one short sentence.".to_string())
+            .trim()
+            .to_string();
+        let model = req
+            .model
+            .unwrap_or_else(|| "claude-sonnet-4-5".to_string())
+            .trim()
+            .to_string();
+        let max_tokens = req.max_tokens.unwrap_or(120).clamp(1, 2048);
 
-        match self.fetch_balance(id).await {
-            Ok(balance) => ProbeCredentialResult {
-                id,
-                success: true,
-                disabled,
-                duration_ms: started.elapsed().as_millis(),
-                message: "探测成功".to_string(),
-                subscription_title: balance.subscription_title,
-                remaining: Some(balance.remaining),
-                usage_limit: Some(balance.usage_limit),
-                error: None,
-            },
+        let request = MessagesRequest {
+            model: model.clone(),
+            max_tokens,
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: serde_json::Value::String(prompt.clone()),
+            }],
+            stream: false,
+            system: None,
+            tools: None,
+            tool_choice: None,
+            thinking: None,
+            output_config: None,
+            metadata: None,
+        };
+        let request_body_value = serde_json::to_value(&request).ok();
+
+        match self.probe_model_request(id, &request).await {
+            Ok((status_code, response_text, raw_response, event_error)) => {
+                let success = event_error.is_none() && (200..300).contains(&status_code);
+                ProbeCredentialResult {
+                    id,
+                    success,
+                    disabled,
+                    duration_ms: started.elapsed().as_millis(),
+                    message: if success {
+                        "????".to_string()
+                    } else {
+                        "????".to_string()
+                    },
+                    probe_prompt: Some(prompt),
+                    model: Some(model),
+                    status_code: Some(status_code),
+                    response_text: Some(response_text),
+                    raw_response: Some(raw_response),
+                    request_body: request_body_value,
+                    subscription_title: None,
+                    remaining: None,
+                    usage_limit: None,
+                    error: event_error,
+                }
+            }
             Err(e) => ProbeCredentialResult {
                 id,
                 success: false,
                 disabled,
                 duration_ms: started.elapsed().as_millis(),
-                message: "探测失败".to_string(),
+                message: "????".to_string(),
+                probe_prompt: Some(prompt),
+                model: Some(model),
+                status_code: None,
+                response_text: None,
+                raw_response: None,
+                request_body: request_body_value,
                 subscription_title: None,
                 remaining: None,
                 usage_limit: None,
@@ -299,6 +366,52 @@ impl AdminService {
             .refresh_token_for(id)
             .await
             .map_err(|e| self.classify_error(e, id))
+    }
+
+    async fn probe_model_request(
+        &self,
+        id: u64,
+        request: &MessagesRequest,
+    ) -> anyhow::Result<(u16, String, String, Option<String>)> {
+        let conversion = convert_request(request)?;
+        let kiro_request = KiroRequest {
+            conversation_state: conversion.conversation_state,
+            profile_arn: self.profile_arn.clone(),
+        };
+        let request_body = serde_json::to_string(&kiro_request)?;
+        let provider =
+            KiroProvider::with_proxy(self.token_manager.clone(), self.proxy_config.clone());
+        let response = provider.call_api(&request_body, Some(id)).await?;
+        let status_code = response.status().as_u16();
+        let body_bytes = response.bytes().await?;
+        let raw_response = String::from_utf8_lossy(&body_bytes).to_string();
+
+        let mut decoder = EventStreamDecoder::new();
+        decoder.feed(&body_bytes)?;
+        let mut response_text = String::new();
+        let mut event_error: Option<String> = None;
+        for frame in decoder.decode_iter().flatten() {
+            if let Ok(event) = Event::from_frame(frame) {
+                match event {
+                    Event::AssistantResponse(resp) => response_text.push_str(&resp.content),
+                    Event::Error {
+                        error_code,
+                        error_message,
+                    } => {
+                        event_error = Some(format!("{}: {}", error_code, error_message));
+                    }
+                    Event::Exception {
+                        exception_type,
+                        message,
+                    } => {
+                        event_error = Some(format!("{}: {}", exception_type, message));
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        Ok((status_code, response_text, raw_response, event_error))
     }
 
     pub async fn probe_credentials(
@@ -317,7 +430,17 @@ impl AdminService {
 
         let mut results = Vec::with_capacity(ids.len());
         for (index, id) in ids.iter().copied().enumerate() {
-            results.push(self.probe_credential(id).await);
+            results.push(
+                self.probe_credential(
+                    id,
+                    ProbeCredentialRequest {
+                        prompt: req.prompt.clone(),
+                        model: req.model.clone(),
+                        max_tokens: req.max_tokens,
+                    },
+                )
+                .await,
+            );
             if index + 1 < ids.len() {
                 tokio::time::sleep(Duration::from_millis(interval_ms)).await;
             }

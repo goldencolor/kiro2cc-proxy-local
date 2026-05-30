@@ -39,6 +39,9 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [verifyDialogOpen, setVerifyDialogOpen] = useState(false)
   const [verifying, setVerifying] = useState(false)
+  const [probePrompt, setProbePrompt] = useState('请回复 OK，并用一句话说明当前账号可用。')
+  const [probeModel, setProbeModel] = useState('claude-sonnet-4-5')
+  const [probeMode, setProbeMode] = useState<'selected' | 'all'>('all')
   const [verifyProgress, setVerifyProgress] = useState({ current: 0, total: 0 })
   const [verifyResults, setVerifyResults] = useState<Map<number, VerifyResult>>(new Map())
   const [balanceMap, setBalanceMap] = useState<Map<number, BalanceResponse>>(new Map())
@@ -455,18 +458,43 @@ export function Dashboard({ onLogout }: DashboardProps) {
         status: 'success',
         usage: result.remaining !== undefined && result.usageLimit !== undefined
           ? `${result.remaining.toFixed(1)}/${result.usageLimit.toFixed(1)}`
-          : result.subscriptionTitle,
+          : result.responseText || result.subscriptionTitle,
+        prompt: result.probePrompt,
+        model: result.model,
+        statusCode: result.statusCode,
+        responseText: result.responseText,
+        rawResponse: result.rawResponse,
       } : {
         id: result.id,
         status: 'failed',
         error: result.error || result.message,
+        prompt: result.probePrompt,
+        model: result.model,
+        statusCode: result.statusCode,
+        responseText: result.responseText,
+        rawResponse: result.rawResponse,
       })
     })
     setVerifyResults(nextResults)
     setVerifyProgress({ current: results.length, total: results.length })
   }
 
+  const openProbeDialog = (mode: 'selected' | 'all') => {
+    if (mode === 'selected' && selectedIds.size === 0) {
+      toast.error('请先选择要探测的凭据')
+      return
+    }
+    setProbeMode(mode)
+    setVerifyResults(new Map())
+    setVerifyProgress({ current: 0, total: mode === 'all' ? data?.credentials.filter(c => !c.disabled).length || 0 : selectedIds.size })
+    setVerifyDialogOpen(true)
+  }
+
   const handleProbeAll = async () => {
+    if (!probePrompt.trim() || !probeModel.trim()) {
+      toast.error('请先填写探测文本和模型')
+      return
+    }
     setVerifying(true)
     cancelVerifyRef.current = false
     setVerifyDialogOpen(true)
@@ -474,7 +502,13 @@ export function Dashboard({ onLogout }: DashboardProps) {
     setVerifyProgress({ current: 0, total: data?.credentials.filter(c => !c.disabled).length || 0 })
 
     try {
-      const response = await probeCredentials({ includeDisabled: false, intervalMs: 2000 })
+      const response = await probeCredentials({
+        includeDisabled: false,
+        intervalMs: 2000,
+        prompt: probePrompt,
+        model: probeModel,
+        maxTokens: 120,
+      })
       applyProbeResults(response.results)
       toast.success(`全局探测完成：成功 ${response.success}/${response.total}`)
       refetch()
@@ -486,6 +520,10 @@ export function Dashboard({ onLogout }: DashboardProps) {
   }
 
   const handleBatchVerify = async () => {
+    if (!probePrompt.trim() || !probeModel.trim()) {
+      toast.error('请先填写探测文本和模型')
+      return
+    }
     if (selectedIds.size === 0) {
       toast.error('请先选择要验活的凭据')
       return
@@ -525,24 +563,47 @@ export function Dashboard({ onLogout }: DashboardProps) {
       })
 
       try {
-        const result = await probeCredential(id)
+        const result = await probeCredential(id, {
+          prompt: probePrompt,
+          model: probeModel,
+          maxTokens: 120,
+        })
         if (!result.success) {
-          throw new Error(result.error || result.message)
-        }
-        successCount++
+          setVerifyResults(prev => {
+            const newResults = new Map(prev)
+            newResults.set(id, {
+              id,
+              status: 'failed',
+              error: result.error || result.message,
+              prompt: result.probePrompt,
+              model: result.model,
+              statusCode: result.statusCode,
+              responseText: result.responseText,
+              rawResponse: result.rawResponse,
+            })
+            return newResults
+          })
+        } else {
+          successCount++
 
         // 更新为成功状态
-        setVerifyResults(prev => {
-          const newResults = new Map(prev)
-          newResults.set(id, {
-            id,
-            status: 'success',
-            usage: result.remaining !== undefined && result.usageLimit !== undefined
-              ? `${result.remaining.toFixed(1)}/${result.usageLimit.toFixed(1)}`
-              : result.subscriptionTitle
+          setVerifyResults(prev => {
+            const newResults = new Map(prev)
+            newResults.set(id, {
+              id,
+              status: 'success',
+              usage: result.remaining !== undefined && result.usageLimit !== undefined
+                ? `${result.remaining.toFixed(1)}/${result.usageLimit.toFixed(1)}`
+                : result.responseText || result.subscriptionTitle,
+              prompt: result.probePrompt,
+              model: result.model,
+              statusCode: result.statusCode,
+              responseText: result.responseText,
+              rawResponse: result.rawResponse,
+            })
+            return newResults
           })
-          return newResults
-        })
+        }
       } catch (error) {
         // 更新为失败状态
         setVerifyResults(prev => {
@@ -550,7 +611,9 @@ export function Dashboard({ onLogout }: DashboardProps) {
           newResults.set(id, {
             id,
             status: 'failed',
-            error: extractErrorMessage(error)
+            error: extractErrorMessage(error),
+            prompt: probePrompt,
+            model: probeModel,
           })
           return newResults
         })
@@ -769,7 +832,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
             <div className="flex flex-wrap items-center gap-2 xl:justify-end">
               {selectedIds.size > 0 && (
                 <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 p-1.5">
-                  <Button onClick={handleBatchVerify} size="sm" variant="outline">
+                  <Button onClick={() => openProbeDialog('selected')} size="sm" variant="outline">
                     <CheckCircle2 className="h-4 w-4 sm:mr-2" />
                     <span className="hidden sm:inline">探测选中</span>
                   </Button>
@@ -791,7 +854,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
               )}
               {data?.credentials && data.credentials.length > 0 && (
                 <Button
-                  onClick={handleProbeAll}
+                  onClick={() => openProbeDialog('all')}
                   size="sm"
                   variant="outline"
                   disabled={verifying}
@@ -950,6 +1013,12 @@ export function Dashboard({ onLogout }: DashboardProps) {
         progress={verifyProgress}
         results={verifyResults}
         onCancel={handleCancelVerify}
+        prompt={probePrompt}
+        model={probeModel}
+        onPromptChange={setProbePrompt}
+        onModelChange={setProbeModel}
+        onStart={probeMode === 'all' ? handleProbeAll : handleBatchVerify}
+        startLabel={probeMode === 'all' ? '开始全局探测' : `开始探测选中 (${selectedIds.size})`}
       />
 
       <ModelListDialog

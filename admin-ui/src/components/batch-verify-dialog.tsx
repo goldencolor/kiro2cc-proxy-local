@@ -12,6 +12,11 @@ export interface VerifyResult {
   status: 'pending' | 'verifying' | 'success' | 'failed'
   usage?: string
   error?: string
+  prompt?: string
+  model?: string
+  statusCode?: number
+  responseText?: string
+  rawResponse?: string
 }
 
 interface BatchVerifyDialogProps {
@@ -21,6 +26,12 @@ interface BatchVerifyDialogProps {
   progress: { current: number; total: number }
   results: Map<number, VerifyResult>
   onCancel: () => void
+  prompt: string
+  model: string
+  onPromptChange: (value: string) => void
+  onModelChange: (value: string) => void
+  onStart: () => void
+  startLabel: string
 }
 
 export function BatchVerifyDialog({
@@ -30,6 +41,12 @@ export function BatchVerifyDialog({
   progress,
   results,
   onCancel,
+  prompt,
+  model,
+  onPromptChange,
+  onModelChange,
+  onStart,
+  startLabel,
 }: BatchVerifyDialogProps) {
   const resultsArray = Array.from(results.values())
   const successCount = resultsArray.filter(r => r.status === 'success').length
@@ -44,6 +61,28 @@ export function BatchVerifyDialog({
         </DialogHeader>
 
         <div className="space-y-4 py-4">
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">探测文本</label>
+              <textarea
+                value={prompt}
+                onChange={(event) => onPromptChange(event.target.value)}
+                disabled={verifying}
+                className="min-h-24 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring disabled:opacity-60"
+                placeholder="输入要真实发送给上游模型的文本"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">模型</label>
+              <input
+                value={model}
+                onChange={(event) => onModelChange(event.target.value)}
+                disabled={verifying}
+                className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring disabled:opacity-60"
+              />
+            </div>
+          </div>
+
           {verifying && (
             <div className="space-y-2">
               <div className="flex justify-between text-sm">
@@ -102,6 +141,26 @@ export function BatchVerifyDialog({
                       错误: {result.error}
                     </div>
                   )}
+                  {result.prompt && (
+                    <div className="mt-2 rounded border border-current/20 p-2 text-xs">
+                      <div className="font-medium">Prompt</div>
+                      <div className="mt-1 whitespace-pre-wrap opacity-90">{result.prompt}</div>
+                    </div>
+                  )}
+                  {result.responseText && (
+                    <div className="mt-2 rounded border border-current/20 p-2 text-xs">
+                      <div className="font-medium">Response</div>
+                      <div className="mt-1 whitespace-pre-wrap opacity-90">{result.responseText}</div>
+                    </div>
+                  )}
+                  {result.rawResponse && (
+                    <details className="mt-2 text-xs">
+                      <summary className="cursor-pointer font-medium">Raw response</summary>
+                      <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded border border-current/20 p-2 opacity-90">
+                        {result.rawResponse}
+                      </pre>
+                    </details>
+                  )}
                 </div>
               ))}
             </div>
@@ -125,9 +184,14 @@ export function BatchVerifyDialog({
               </Button>
             </>
           ) : (
-            <Button type="button" onClick={() => onOpenChange(false)}>
-              关闭
-            </Button>
+            <>
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+                Close
+              </Button>
+              <Button type="button" onClick={onStart} disabled={!prompt.trim() || !model.trim()}>
+                {startLabel}
+              </Button>
+            </>
           )}
         </div>
       </DialogContent>

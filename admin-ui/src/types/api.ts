@@ -71,6 +71,12 @@ export interface ProbeCredentialResult {
   disabled: boolean
   durationMs: number
   message: string
+  probePrompt?: string
+  model?: string
+  statusCode?: number
+  responseText?: string
+  rawResponse?: string
+  requestBody?: unknown
   subscriptionTitle?: string
   remaining?: number
   usageLimit?: number

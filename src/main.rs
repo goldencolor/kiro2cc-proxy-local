@@ -144,7 +144,7 @@ async fn main() {
         api_url: config.count_tokens_api_url.clone(),
         api_key: config.count_tokens_api_key.clone(),
         auth_type: config.count_tokens_auth_type.clone(),
-        proxy: proxy_config,
+        proxy: proxy_config.clone(),
         tls_backend: config.tls_backend,
     });
     anthropic::kv_cache::set_kv_cache_config(
@@ -208,7 +208,11 @@ async fn main() {
             tracing::warn!("admin_api_key 配置为空，Admin API 未启用");
             anthropic_app
         } else {
-            let admin_service = admin::AdminService::new(token_manager.clone());
+            let admin_service = admin::AdminService::new(
+                token_manager.clone(),
+                proxy_config.clone(),
+                first_credentials.profile_arn.clone(),
+            );
             let admin_api_key_shared = Arc::new(parking_lot::RwLock::new(admin_key.clone()));
             let mut admin_state = admin::AdminState::new(admin_api_key_shared, admin_service)
                 .with_master_api_key(api_key_shared.clone())

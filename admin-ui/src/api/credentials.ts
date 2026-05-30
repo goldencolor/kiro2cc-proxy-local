@@ -96,18 +96,32 @@ export async function getCredentialBalance(id: number): Promise<BalanceResponse>
 }
 
 // 添加新凭据
-export async function probeCredential(id: number): Promise<ProbeCredentialResult> {
-  const { data } = await api.post<ProbeCredentialResult>(`/credentials/${id}/probe`)
+export async function probeCredential(id: number, params?: {
+  prompt?: string
+  model?: string
+  maxTokens?: number
+}): Promise<ProbeCredentialResult> {
+  const { data } = await api.post<ProbeCredentialResult>(`/credentials/${id}/probe`, {
+    prompt: params?.prompt,
+    model: params?.model,
+    maxTokens: params?.maxTokens,
+  })
   return data
 }
 
 export async function probeCredentials(params?: {
   includeDisabled?: boolean
   intervalMs?: number
+  prompt?: string
+  model?: string
+  maxTokens?: number
 }): Promise<ProbeCredentialsResponse> {
   const { data } = await api.post<ProbeCredentialsResponse>('/credentials/probe', {
     includeDisabled: params?.includeDisabled ?? false,
     intervalMs: params?.intervalMs ?? 2000,
+    prompt: params?.prompt,
+    model: params?.model,
+    maxTokens: params?.maxTokens,
   })
   return data
 }

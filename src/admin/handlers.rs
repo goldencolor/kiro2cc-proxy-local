@@ -9,9 +9,9 @@ use axum::{
 use super::{
     middleware::AdminState,
     types::{
-        AddCredentialRequest, ProbeCredentialsRequest, RequestDetailsQuery, SetAlertConfigRequest,
-        SetDisabledRequest, SetKvCacheConfigRequest, SetLoadBalancingModeRequest,
-        SetPriorityRequest, SuccessResponse, UpdateCredentialRequest,
+        AddCredentialRequest, ProbeCredentialRequest, ProbeCredentialsRequest, RequestDetailsQuery,
+        SetAlertConfigRequest, SetDisabledRequest, SetKvCacheConfigRequest,
+        SetLoadBalancingModeRequest, SetPriorityRequest, SuccessResponse, UpdateCredentialRequest,
     },
 };
 
@@ -92,8 +92,9 @@ pub async fn get_credential_balance(
 pub async fn probe_credential(
     State(state): State<AdminState>,
     Path(id): Path<u64>,
+    Json(payload): Json<ProbeCredentialRequest>,
 ) -> impl IntoResponse {
-    Json(state.service.probe_credential(id).await)
+    Json(state.service.probe_credential(id, payload).await)
 }
 
 pub async fn refresh_credential_token(
