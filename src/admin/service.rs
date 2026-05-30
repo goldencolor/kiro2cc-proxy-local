@@ -384,13 +384,20 @@ impl AdminService {
         let response = provider.call_api(&request_body, Some(id)).await?;
         let status_code = response.status().as_u16();
         let body_bytes = response.bytes().await?;
-        let raw_response = String::from_utf8_lossy(&body_bytes).to_string();
-
         let mut decoder = EventStreamDecoder::new();
         decoder.feed(&body_bytes)?;
         let mut response_text = String::new();
         let mut event_error: Option<String> = None;
+        let mut decoded_events = Vec::new();
         for frame in decoder.decode_iter().flatten() {
+            let payload = serde_json::from_slice::<serde_json::Value>(&frame.payload)
+                .unwrap_or_else(|_| serde_json::Value::String(frame.payload_as_str()));
+            decoded_events.push(serde_json::json!({
+                "messageType": frame.message_type(),
+                "eventType": frame.event_type(),
+                "payload": payload,
+            }));
+
             if let Ok(event) = Event::from_frame(frame) {
                 match event {
                     Event::AssistantResponse(resp) => response_text.push_str(&resp.content),
@@ -410,6 +417,7 @@ impl AdminService {
                 }
             }
         }
+        let raw_response = serde_json::to_string_pretty(&decoded_events)?;
 
         Ok((status_code, response_text, raw_response, event_error))
     }

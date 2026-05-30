@@ -19,9 +19,9 @@ import { UsageLogPage } from '@/components/usage-log-page'
 import { ModelListDialog } from '@/components/model-list-dialog'
 import { RequestDetailsPanel } from '@/components/request-details-panel'
 import { useCredentials, useDeleteCredential, useResetFailure, useRpm } from '@/hooks/use-credentials'
-import { exportCredentials, getCredentialBalance, probeCredential, probeCredentials } from '@/api/credentials'
+import { exportCredentials, getCredentialBalance, getModels, probeCredential, probeCredentials } from '@/api/credentials'
 import { extractErrorMessage } from '@/lib/utils'
-import type { BalanceResponse, CredentialStatusItem } from '@/types/api'
+import type { BalanceResponse, CredentialStatusItem, ModelItem } from '@/types/api'
 
 interface DashboardProps {
   onLogout: () => void
@@ -41,6 +41,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const [verifying, setVerifying] = useState(false)
   const [probePrompt, setProbePrompt] = useState('请回复 OK，并用一句话说明当前账号可用。')
   const [probeModel, setProbeModel] = useState('claude-sonnet-4-5')
+  const [probeModels, setProbeModels] = useState<ModelItem[]>([])
   const [probeMode, setProbeMode] = useState<'selected' | 'all'>('all')
   const [verifyProgress, setVerifyProgress] = useState({ current: 0, total: 0 })
   const [verifyResults, setVerifyResults] = useState<Map<number, VerifyResult>>(new Map())
@@ -489,6 +490,18 @@ export function Dashboard({ onLogout }: DashboardProps) {
     setVerifyProgress({ current: 0, total: mode === 'all' ? data?.credentials.filter(c => !c.disabled).length || 0 : selectedIds.size })
     setVerifyDialogOpen(true)
   }
+
+  useEffect(() => {
+    if (!verifyDialogOpen || probeModels.length > 0) return
+    getModels()
+      .then((response) => {
+        setProbeModels(response.data)
+        if (!response.data.some((item) => item.id === probeModel) && response.data[0]) {
+          setProbeModel(response.data[0].id)
+        }
+      })
+      .catch((error) => toast.error(extractErrorMessage(error)))
+  }, [verifyDialogOpen, probeModels.length, probeModel])
 
   const handleProbeAll = async () => {
     if (!probePrompt.trim() || !probeModel.trim()) {
@@ -1015,6 +1028,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
         onCancel={handleCancelVerify}
         prompt={probePrompt}
         model={probeModel}
+        models={probeModels}
         onPromptChange={setProbePrompt}
         onModelChange={setProbeModel}
         onStart={probeMode === 'all' ? handleProbeAll : handleBatchVerify}

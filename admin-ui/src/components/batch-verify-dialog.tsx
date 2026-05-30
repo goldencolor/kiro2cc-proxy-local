@@ -6,6 +6,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import type { ModelItem } from '@/types/api'
 
 export interface VerifyResult {
   id: number
@@ -28,6 +29,7 @@ interface BatchVerifyDialogProps {
   onCancel: () => void
   prompt: string
   model: string
+  models: ModelItem[]
   onPromptChange: (value: string) => void
   onModelChange: (value: string) => void
   onStart: () => void
@@ -43,6 +45,7 @@ export function BatchVerifyDialog({
   onCancel,
   prompt,
   model,
+  models,
   onPromptChange,
   onModelChange,
   onStart,
@@ -63,23 +66,30 @@ export function BatchVerifyDialog({
         <div className="space-y-4 py-4">
           <div className="space-y-3">
             <div className="space-y-1.5">
-              <label className="text-sm font-medium">探测文本</label>
+              <label className="text-sm font-medium">Probe prompt</label>
               <textarea
                 value={prompt}
                 onChange={(event) => onPromptChange(event.target.value)}
                 disabled={verifying}
                 className="min-h-24 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring disabled:opacity-60"
-                placeholder="输入要真实发送给上游模型的文本"
+                placeholder="Text that will be sent to the upstream model"
               />
             </div>
             <div className="space-y-1.5">
-              <label className="text-sm font-medium">模型</label>
-              <input
+              <label className="text-sm font-medium">Model</label>
+              <select
                 value={model}
                 onChange={(event) => onModelChange(event.target.value)}
                 disabled={verifying}
                 className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring disabled:opacity-60"
-              />
+              >
+                {models.length === 0 && <option value={model}>{model}</option>}
+                {models.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.display_name || item.id}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 
