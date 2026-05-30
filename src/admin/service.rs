@@ -140,7 +140,7 @@ impl AdminService {
             .collect();
 
         // 按优先级排序（数字越小优先级越高）
-        credentials.sort_by_key(|c| c.priority);
+        credentials.sort_by_key(|c| (c.priority, c.id));
 
         CredentialsStatusResponse {
             total: snapshot.total,
