@@ -28,6 +28,8 @@ pub struct CredentialStatusItem {
     pub priority: u32,
     /// 是否被禁用
     pub disabled: bool,
+    /// 禁用原因
+    pub disabled_reason: Option<String>,
     /// 连续失败次数
     pub failure_count: u32,
     /// 是否为当前活跃凭据
@@ -52,6 +54,8 @@ pub struct CredentialStatusItem {
     pub last_used_at: Option<String>,
     /// 是否配置了凭据级代理
     pub has_proxy: bool,
+    /// 429 限流冷却剩余秒数
+    pub cooldown_remaining_secs: u64,
     /// 代理 URL（用于前端展示）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub proxy_url: Option<String>,

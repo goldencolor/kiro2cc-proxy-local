@@ -82,6 +82,7 @@ export function CredentialCard({
   const resetFailure = useResetFailure()
   const refreshToken = useRefreshCredentialToken()
   const deleteCredential = useDeleteCredential()
+  const isQuotaExceeded = credential.disabledReason === 'quotaExceeded'
 
   const handleToggleDisabled = () => {
     setDisabled.mutate(
@@ -169,7 +170,10 @@ export function CredentialCard({
                   <Badge variant="success">当前</Badge>
                 )}
                 {credential.disabled && (
-                  <Badge variant="destructive">已禁用</Badge>
+                  <Badge variant="destructive">{isQuotaExceeded ? '额度超额' : '已禁用'}</Badge>
+                )}
+                {credential.cooldownRemainingSecs > 0 && !credential.disabled && (
+                  <Badge variant="secondary">冷却 {credential.cooldownRemainingSecs}s</Badge>
                 )}
               </CardTitle>
             </div>
@@ -240,6 +244,11 @@ export function CredentialCard({
                 {credential.failureCount}
               </span>
             </div>
+            {isQuotaExceeded && (
+              <div className="col-span-2 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-sm text-destructive">
+                该账号已触发月度额度超额，已自动禁用，不会参与请求调度。
+              </div>
+            )}
             <div>
               <span className="text-muted-foreground">订阅等级：</span>
               <span className="font-medium">

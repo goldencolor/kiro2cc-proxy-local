@@ -503,6 +503,8 @@ struct CredentialEntry {
     success_count: u64,
     /// 最后一次 API 调用时间（RFC3339 格式）
     last_used_at: Option<String>,
+    /// 429 限流后的临时冷却截止时间
+    cooldown_until: Option<Instant>,
 }
 
 /// 禁用原因
@@ -537,6 +539,8 @@ pub struct CredentialEntrySnapshot {
     pub priority: u32,
     /// 是否被禁用
     pub disabled: bool,
+    /// 禁用原因
+    pub disabled_reason: Option<String>,
     /// 连续失败次数
     pub failure_count: u32,
     /// 认证方式
@@ -559,6 +563,8 @@ pub struct CredentialEntrySnapshot {
     pub last_used_at: Option<String>,
     /// 是否配置了凭据级代理
     pub has_proxy: bool,
+    /// 429 限流冷却剩余秒数
+    pub cooldown_remaining_secs: u64,
     /// 代理 URL（用于前端展示）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub proxy_url: Option<String>,
@@ -617,6 +623,36 @@ const MAX_FAILURES_PER_CREDENTIAL: u32 = 3;
 const STATS_SAVE_DEBOUNCE: StdDuration = StdDuration::from_secs(30);
 /// Sticky cache 条目存活时间（60 分钟不活跃后自动淘汰）
 const STICKY_CACHE_TTL: StdDuration = StdDuration::from_secs(60 * 60);
+
+fn rate_limit_cooldown() -> StdDuration {
+    let secs = std::env::var("COOLDOWN_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(60)
+        .max(1);
+    StdDuration::from_secs(secs)
+}
+
+fn cooldown_remaining_secs(entry: &CredentialEntry) -> u64 {
+    entry
+        .cooldown_until
+        .and_then(|until| until.checked_duration_since(Instant::now()))
+        .map(|d| d.as_secs().max(1))
+        .unwrap_or(0)
+}
+
+fn is_in_cooldown(entry: &CredentialEntry) -> bool {
+    cooldown_remaining_secs(entry) > 0
+}
+
+fn disabled_reason_label(reason: Option<DisabledReason>) -> Option<String> {
+    match reason {
+        Some(DisabledReason::Manual) => Some("manual".to_string()),
+        Some(DisabledReason::TooManyFailures) => Some("tooManyFailures".to_string()),
+        Some(DisabledReason::QuotaExceeded) => Some("quotaExceeded".to_string()),
+        None => None,
+    }
+}
 
 /// Sticky cache 条目：记录会话到凭据的绑定关系
 struct StickyCacheEntry {
@@ -693,6 +729,7 @@ impl MultiTokenManager {
                     },
                     success_count: 0,
                     last_used_at: None,
+                    cooldown_until: None,
                 }
             })
             .collect();
@@ -771,7 +808,11 @@ impl MultiTokenManager {
 
     /// 获取可用凭据数量
     pub fn available_count(&self) -> usize {
-        self.entries.lock().iter().filter(|e| !e.disabled).count()
+        self.entries
+            .lock()
+            .iter()
+            .filter(|e| !e.disabled && !is_in_cooldown(e))
+            .count()
     }
 
     /// 根据负载均衡模式选择下一个凭据
@@ -803,7 +844,7 @@ impl MultiTokenManager {
         let available: Vec<_> = entries
             .iter()
             .filter(|e| {
-                if e.disabled || excluded.contains(&e.id) {
+                if e.disabled || excluded.contains(&e.id) || is_in_cooldown(e) {
                     return false;
                 }
                 // 如果是 opus 模型，需要检查订阅等级
@@ -896,7 +937,10 @@ impl MultiTokenManager {
                     // 注意：必须在 bail! 之前计算 available_count，
                     // 因为 available_count() 会尝试获取 entries 锁，
                     // 而此时我们已经持有该锁，会导致死锁
-                    let available = entries.iter().filter(|e| !e.disabled).count();
+                    let available = entries
+                        .iter()
+                        .filter(|e| !e.disabled && !is_in_cooldown(e))
+                        .count();
                     anyhow::bail!("所有凭据均已禁用（{}/{}）", available, total);
                 }
             };
@@ -931,6 +975,12 @@ impl MultiTokenManager {
             if entry.disabled {
                 anyhow::bail!("Pinned credential #{} is disabled", credential_id);
             }
+            if is_in_cooldown(entry) {
+                anyhow::bail!(
+                    "Pinned credential #{} is rate limited and cooling down",
+                    credential_id
+                );
+            }
             entry.credentials.clone()
         };
         self.try_ensure_token(credential_id, &credentials).await
@@ -957,7 +1007,9 @@ impl MultiTokenManager {
                     let entries = self.entries.lock();
                     entries
                         .iter()
-                        .find(|e| e.id == entry.credential_id && !e.disabled)
+                        .find(|e| {
+                            e.id == entry.credential_id && !e.disabled && !is_in_cooldown(e)
+                        })
                         .map(|e| (e.id, e.credentials.clone()))
                 } else {
                     None
@@ -1021,7 +1073,7 @@ impl MultiTokenManager {
         // 选择优先级最高的未禁用凭据（排除当前凭据）
         if let Some(entry) = entries
             .iter()
-            .filter(|e| !e.disabled && e.id != *current_id)
+            .filter(|e| !e.disabled && e.id != *current_id && !is_in_cooldown(e))
             .min_by_key(|e| (e.credentials.priority, e.id))
         {
             *current_id = entry.id;
@@ -1044,7 +1096,7 @@ impl MultiTokenManager {
         // 选择优先级最高的未禁用凭据（不排除当前凭据）
         if let Some(best) = entries
             .iter()
-            .filter(|e| !e.disabled)
+            .filter(|e| !e.disabled && !is_in_cooldown(e))
             .min_by_key(|e| (e.credentials.priority, e.id))
         {
             if best.id != *current_id {
@@ -1056,6 +1108,19 @@ impl MultiTokenManager {
                 );
                 *current_id = best.id;
             }
+        }
+    }
+
+    fn clear_sticky_cache(&self, reason: &str) {
+        let cleared = {
+            let mut cache = self.sticky_cache.lock();
+            let cleared = cache.len();
+            cache.clear();
+            cleared
+        };
+
+        if cleared > 0 {
+            tracing::info!("已清理 {} 条 sticky 路由缓存（{}）", cleared, reason);
         }
     }
 
@@ -1320,6 +1385,7 @@ impl MultiTokenManager {
             let mut entries = self.entries.lock();
             if let Some(entry) = entries.iter_mut().find(|e| e.id == id) {
                 entry.failure_count = 0;
+                entry.cooldown_until = None;
                 entry.success_count += 1;
                 entry.last_used_at = Some(Utc::now().to_rfc3339());
                 tracing::debug!(
@@ -1330,6 +1396,51 @@ impl MultiTokenManager {
             }
         }
         self.save_stats_debounced();
+    }
+
+    /// 报告指定凭据触发 429 限流。
+    ///
+    /// 429 是账号级临时限流，不计入连续失败；这里临时冷却该账号并清理
+    /// sticky 绑定，让下一次重试能切到其他可用账号。
+    pub fn report_rate_limited(&self, id: u64) -> bool {
+        let cooldown = rate_limit_cooldown();
+        let result = {
+            let mut entries = self.entries.lock();
+            let mut current_id = self.current_id.lock();
+
+            if let Some(entry) = entries.iter_mut().find(|e| e.id == id) {
+                entry.cooldown_until = Some(Instant::now() + cooldown);
+                entry.last_used_at = Some(Utc::now().to_rfc3339());
+                tracing::warn!(
+                    "凭据 #{} 触发 429 限流，冷却 {} 秒后再参与调度",
+                    id,
+                    cooldown.as_secs()
+                );
+            }
+
+            if *current_id == id {
+                if let Some(next) = entries
+                    .iter()
+                    .filter(|e| !e.disabled && e.id != id && !is_in_cooldown(e))
+                    .min_by_key(|e| (e.credentials.priority, e.id))
+                {
+                    *current_id = next.id;
+                    tracing::info!(
+                        "429 后已切换到凭据 #{}（优先级 {}）",
+                        next.id,
+                        next.credentials.priority
+                    );
+                }
+            }
+
+            entries.iter().any(|e| !e.disabled && !is_in_cooldown(e))
+        };
+
+        self.sticky_cache
+            .lock()
+            .retain(|_, entry| entry.credential_id != id);
+        self.save_stats_debounced();
+        result
     }
 
     /// 报告指定凭据 API 调用失败
@@ -1514,7 +1625,10 @@ impl MultiTokenManager {
     pub fn snapshot(&self) -> ManagerSnapshot {
         let entries = self.entries.lock();
         let current_id = *self.current_id.lock();
-        let available = entries.iter().filter(|e| !e.disabled).count();
+        let available = entries
+            .iter()
+            .filter(|e| !e.disabled && !is_in_cooldown(e))
+            .count();
 
         ManagerSnapshot {
             entries: entries
@@ -1523,6 +1637,7 @@ impl MultiTokenManager {
                     id: e.id,
                     priority: e.credentials.priority,
                     disabled: e.disabled,
+                    disabled_reason: disabled_reason_label(e.disabled_reason),
                     failure_count: e.failure_count,
                     auth_method: e.credentials.auth_method.as_deref().map(|m| {
                         if m.eq_ignore_ascii_case("builder-id") || m.eq_ignore_ascii_case("iam") {
@@ -1540,6 +1655,7 @@ impl MultiTokenManager {
                     success_count: e.success_count,
                     last_used_at: e.last_used_at.clone(),
                     has_proxy: e.credentials.proxy_url.is_some(),
+                    cooldown_remaining_secs: cooldown_remaining_secs(e),
                     proxy_url: e.credentials.proxy_url.clone(),
                     api_region: e.credentials.api_region.clone(),
                     runtime_endpoint: e.credentials.runtime_endpoint.clone(),
@@ -1588,6 +1704,7 @@ impl MultiTokenManager {
         }
         // 立即按新优先级重新选择当前凭据（无论持久化是否成功）
         self.select_highest_priority();
+        self.clear_sticky_cache("credential priority changed");
         // 持久化更改
         self.persist_credentials()?;
         Ok(())
@@ -1855,6 +1972,7 @@ impl MultiTokenManager {
                 disabled_reason: None,
                 success_count: 0,
                 last_used_at: None,
+                cooldown_until: None,
             });
         }
 
@@ -2188,6 +2306,7 @@ impl MultiTokenManager {
         }
 
         *self.load_balancing_mode.lock() = mode.clone();
+        self.clear_sticky_cache("load balancing mode changed");
 
         if let Err(err) = self.persist_load_balancing_mode(&mode) {
             tracing::warn!("负载均衡模式持久化失败，仅当前进程生效: {}", err);

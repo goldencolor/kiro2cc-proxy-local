@@ -433,7 +433,7 @@ impl KiroProvider {
                     status,
                     body
                 );
-                self.token_manager.report_success(ctx.id);
+                self.token_manager.report_rate_limited(ctx.id);
                 last_error = Some(anyhow::anyhow!("MCP 请求失败: {} {}", status, body));
                 if attempt + 1 < max_retries {
                     sleep(Self::retry_delay(attempt)).await;
@@ -660,8 +660,16 @@ impl KiroProvider {
                     status,
                     body
                 );
-                // 递增 success_count，使 balanced 模式下一次 acquire_context 选择其他凭据
-                self.token_manager.report_success(ctx.id);
+                if pinned_credential_id.is_some() {
+                    anyhow::bail!(
+                        "{} API 请求失败（绑定凭据被上游限流）: {} {}",
+                        api_type,
+                        status,
+                        body
+                    );
+                }
+
+                self.token_manager.report_rate_limited(ctx.id);
                 last_error = Some(anyhow::anyhow!(
                     "{} API 请求失败: {} {}",
                     api_type,

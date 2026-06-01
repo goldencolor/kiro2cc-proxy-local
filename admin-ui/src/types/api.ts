@@ -11,6 +11,7 @@ export interface CredentialStatusItem {
   id: number
   priority: number
   disabled: boolean
+  disabledReason?: 'manual' | 'tooManyFailures' | 'quotaExceeded' | string | null
   failureCount: number
   isCurrent: boolean
   expiresAt: string | null
@@ -23,6 +24,7 @@ export interface CredentialStatusItem {
   successCount: number
   lastUsedAt: string | null
   hasProxy: boolean
+  cooldownRemainingSecs: number
   proxyUrl?: string
   apiRegion?: string
   runtimeEndpoint?: string
