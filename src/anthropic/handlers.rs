@@ -5,6 +5,7 @@ use std::convert::Infallible;
 use crate::kiro::model::events::Event;
 use crate::kiro::model::requests::kiro::KiroRequest;
 use crate::kiro::parser::decoder::EventStreamDecoder;
+use crate::kiro::provider::CREDENTIAL_ID_HEADER;
 use crate::token;
 use anyhow::Error;
 use axum::{
@@ -35,6 +36,18 @@ use super::types::{
     OutputConfig, Thinking,
 };
 use super::websearch;
+
+fn response_credential_id(
+    response: &reqwest::Response,
+    fallback: Option<u64>,
+) -> Option<u64> {
+    response
+        .headers()
+        .get(CREDENTIAL_ID_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok())
+        .or(fallback)
+}
 
 fn build_kv_prompt_cache_usage(
     endpoint: &'static str,
@@ -699,8 +712,9 @@ async fn handle_stream_request(
     };
 
     // 创建流处理上下文
+    let credential_id = response_credential_id(&response, pinned_credential_id);
     let mut ctx = StreamContext::new_with_thinking(model, input_tokens, thinking_enabled)
-        .with_usage_tracking(usage_tracker, api_key_id, pinned_credential_id, client_ip)
+        .with_usage_tracking(usage_tracker, api_key_id, credential_id, client_ip)
         .with_prompt_cache_usage(prompt_cache_usage)
         .with_request_detail(request_detail_input);
 
@@ -897,6 +911,7 @@ async fn handle_non_stream_request(
     };
 
     // 读取响应体
+    let credential_id = response_credential_id(&response, pinned_credential_id);
     let body_bytes = match response.bytes().await {
         Ok(bytes) => bytes,
         Err(e) => {
@@ -1070,13 +1085,13 @@ async fn handle_non_stream_request(
     request_detail_input.status = Some("200".to_string());
     request_detail_input.latency_ms = Some(started_at.elapsed().as_millis());
     request_detail_input.client_ip = client_ip.clone();
-    request_detail_input.credential_id = pinned_credential_id;
+    request_detail_input.credential_id = credential_id;
 
     // 记录用量（内部使用真实值）
     if let (Some(tracker), Some(key_id)) = (&usage_tracker, api_key_id) {
         tracker.record(
             key_id,
-            pinned_credential_id,
+            credential_id,
             model.to_string(),
             final_input_tokens,
             output_tokens,
@@ -1370,8 +1385,9 @@ async fn handle_stream_request_buffered(
     };
 
     // 创建缓冲流处理上下文
+    let credential_id = response_credential_id(&response, pinned_credential_id);
     let ctx = BufferedStreamContext::new(model, estimated_input_tokens, thinking_enabled)
-        .with_usage_tracking(usage_tracker, api_key_id, pinned_credential_id, client_ip)
+        .with_usage_tracking(usage_tracker, api_key_id, credential_id, client_ip)
         .with_prompt_cache_usage(prompt_cache_usage)
         .with_request_detail(request_detail_input);
 

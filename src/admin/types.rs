@@ -324,7 +324,7 @@ pub struct RequestDetailItem {
     pub request_id: String,
     pub endpoint: String,
     pub model: String,
-    pub credential_id: u64,
+    pub credential_id: Option<u64>,
     pub stream: bool,
     pub cache_hit: bool,
     pub input_tokens: i32,

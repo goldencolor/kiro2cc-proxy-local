@@ -104,7 +104,7 @@ export interface RequestDetailItem {
   requestId: string
   endpoint: string
   model: string
-  credentialId: number
+  credentialId: number | null
   stream: boolean
   cacheHit: boolean
   inputTokens: number

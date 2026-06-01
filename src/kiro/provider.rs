@@ -21,6 +21,8 @@ use crate::model::rpm::RpmTracker;
 use parking_lot::Mutex;
 use tokio::sync::Semaphore;
 
+pub const CREDENTIAL_ID_HEADER: &str = "x-kiro-credential-id";
+
 /// Kiro API Provider
 ///
 /// 核心组件，负责与 Kiro API 通信
@@ -393,6 +395,11 @@ impl KiroProvider {
                 if let Some(rpm) = &self.rpm_tracker {
                     rpm.record_credential(ctx.id);
                 }
+                let mut response = response;
+                response.headers_mut().insert(
+                    CREDENTIAL_ID_HEADER,
+                    HeaderValue::from_str(&ctx.id.to_string())?,
+                );
                 return Ok(response);
             }
 
@@ -564,6 +571,11 @@ impl KiroProvider {
                 if let Some(rpm) = &self.rpm_tracker {
                     rpm.record_credential(ctx.id);
                 }
+                let mut response = response;
+                response.headers_mut().insert(
+                    CREDENTIAL_ID_HEADER,
+                    HeaderValue::from_str(&ctx.id.to_string())?,
+                );
                 return Ok(response);
             }
 

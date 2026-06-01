@@ -21,6 +21,10 @@ function formatCost(usd: number): string {
   return `$${usd.toFixed(3)}`
 }
 
+function formatCredentialSource(credentialId: number | null): string {
+  return credentialId != null ? `账号 #${credentialId}` : '未知'
+}
+
 function formatTokens(n: number): string {
   if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`
   if (n >= 1000) return `${(n / 1000).toFixed(1)}K`
@@ -262,7 +266,7 @@ export function RequestDetailsPanel() {
                     onClick={() => setSelectedRecord(r)}
                   >
                     <td className="whitespace-nowrap px-3 py-1.5 text-xs tabular-nums text-muted-foreground">{formatTime(r.recordedAt)}</td>
-                    <td className="px-3 py-1.5 text-xs font-medium text-foreground">账号 #{r.credentialId}</td>
+                    <td className="px-3 py-1.5 text-xs font-medium text-foreground">{formatCredentialSource(r.credentialId)}</td>
                     <td className="px-3 py-1.5 text-xs font-medium">{modelShortName(r.model)}</td>
                     <td className="px-3 py-1.5 text-xs text-muted-foreground">{r.endpoint.replace('/v1/', '')}</td>
                     <td className="px-3 py-1.5 text-right text-xs tabular-nums">{formatTokens(r.inputTokens)}</td>
@@ -296,7 +300,7 @@ export function RequestDetailsPanel() {
                 <div><span className="text-muted-foreground">时间：</span>{formatTime(selectedRecord.recordedAt)}</div>
                 <div><span className="text-muted-foreground">模型：</span>{selectedRecord.model}</div>
                 <div><span className="text-muted-foreground">端点：</span>{selectedRecord.endpoint}</div>
-                <div><span className="text-muted-foreground">请求来源：</span>账号 #{selectedRecord.credentialId}</div>
+                <div><span className="text-muted-foreground">请求来源：</span>{formatCredentialSource(selectedRecord.credentialId)}</div>
                 <div><span className="text-muted-foreground">模式：</span>{selectedRecord.stream ? 'SSE' : 'Sync'}</div>
                 <div><span className="text-muted-foreground">状态：</span>{selectedRecord.status ?? '-'}</div>
                 <div><span className="text-muted-foreground">耗时：</span>{selectedRecord.latencyMs != null ? `${selectedRecord.latencyMs}ms` : '-'}</div>

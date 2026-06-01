@@ -47,7 +47,7 @@ struct KvCacheRecordRow {
     #[serde(default)]
     cache_key: String,
     #[serde(default)]
-    credential_id: u64,
+    credential_id: Option<u64>,
     stream: bool,
     cache_hit: bool,
     cache_creation_input_tokens: i32,
