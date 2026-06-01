@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { RefreshCw, LogOut, Moon, Sun, Server, Plus, Upload, FileUp, Trash2, RotateCcw, CheckCircle2, Key, Settings, ListTree, Download, Database, CheckSquare } from 'lucide-react'
+import { RefreshCw, LogOut, Moon, Sun, Server, Plus, Upload, FileUp, Trash2, RotateCcw, CheckCircle2, Key, Settings, ListTree, Download, Database, CheckSquare, LayoutGrid, List } from 'lucide-react'
 const kiroIcon = '/admin/kiro-icon.png'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -36,6 +36,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const [batchImportDialogOpen, setBatchImportDialogOpen] = useState(false)
   const [kamImportDialogOpen, setKamImportDialogOpen] = useState(false)
   const [modelListOpen, setModelListOpen] = useState(false)
+  const [credentialViewMode, setCredentialViewMode] = useState<'card' | 'list'>('card')
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [verifyDialogOpen, setVerifyDialogOpen] = useState(false)
   const [verifying, setVerifying] = useState(false)
@@ -95,6 +96,10 @@ export function Dashboard({ onLogout }: DashboardProps) {
   useEffect(() => {
     setCurrentPage(1)
   }, [data?.credentials.length])
+
+  useEffect(() => {
+    setSelectedIds(new Set())
+  }, [credentialViewMode])
 
   useEffect(() => {
     if (detailCredentialId !== null && data && !data.credentials.find(c => c.id === detailCredentialId)) {
@@ -731,6 +736,28 @@ export function Dashboard({ onLogout }: DashboardProps) {
                 <span className="hidden sm:inline">设置</span>
               </Button>
             </div>
+            {activeTab === 'credentials' && (
+              <div className="hidden lg:flex items-center gap-1 rounded-lg border bg-muted p-1">
+                <Button
+                  variant={credentialViewMode === 'card' ? 'default' : 'ghost'}
+                  size="sm"
+                  onClick={() => setCredentialViewMode('card')}
+                  className="h-7 px-2 sm:px-3 text-xs"
+                >
+                  <LayoutGrid className="h-3 w-3 sm:mr-1" />
+                  <span className="hidden sm:inline">卡片</span>
+                </Button>
+                <Button
+                  variant={credentialViewMode === 'list' ? 'default' : 'ghost'}
+                  size="sm"
+                  onClick={() => setCredentialViewMode('list')}
+                  className="h-7 px-2 sm:px-3 text-xs"
+                >
+                  <List className="h-3 w-3 sm:mr-1" />
+                  <span className="hidden sm:inline">列表</span>
+                </Button>
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-1 sm:gap-2">
             <Button variant="outline" size="sm" onClick={() => setModelListOpen(true)} className="h-8 px-2 sm:px-3">
@@ -945,21 +972,40 @@ export function Dashboard({ onLogout }: DashboardProps) {
             />
           ) : (
             <>
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {currentCredentials.map((credential) => (
-                  <CredentialCard
-                    key={credential.id}
-                    credential={credential}
-                    onViewBalance={handleViewBalance}
-                    onViewLog={setDetailCredentialId}
-                    selected={selectedIds.has(credential.id)}
-                    onToggleSelect={() => toggleSelect(credential.id)}
-                    balance={balanceMap.get(credential.id) || null}
-                    loadingBalance={loadingBalanceIds.has(credential.id)}
-                    rpm={rpmData?.byCredential?.[String(credential.id)] ?? 0}
-                  />
-                ))}
-              </div>
+              {credentialViewMode === 'list' ? (
+                <div className="space-y-3">
+                  {currentCredentials.map((credential) => (
+                    <CredentialCard
+                      key={credential.id}
+                      credential={credential}
+                      onViewBalance={handleViewBalance}
+                      onViewLog={setDetailCredentialId}
+                      selected={selectedIds.has(credential.id)}
+                      onToggleSelect={() => toggleSelect(credential.id)}
+                      balance={balanceMap.get(credential.id) || null}
+                      loadingBalance={loadingBalanceIds.has(credential.id)}
+                      rpm={rpmData?.byCredential?.[String(credential.id)] ?? 0}
+                      variant="list"
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  {currentCredentials.map((credential) => (
+                    <CredentialCard
+                      key={credential.id}
+                      credential={credential}
+                      onViewBalance={handleViewBalance}
+                      onViewLog={setDetailCredentialId}
+                      selected={selectedIds.has(credential.id)}
+                      onToggleSelect={() => toggleSelect(credential.id)}
+                      balance={balanceMap.get(credential.id) || null}
+                      loadingBalance={loadingBalanceIds.has(credential.id)}
+                      rpm={rpmData?.byCredential?.[String(credential.id)] ?? 0}
+                    />
+                  ))}
+                </div>
+              )}
 
               {/* 分页控件 */}
               {totalPages > 1 && (

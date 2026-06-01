@@ -633,6 +633,15 @@ fn rate_limit_cooldown() -> StdDuration {
     StdDuration::from_secs(secs)
 }
 
+fn risk_control_cooldown() -> StdDuration {
+    let secs = std::env::var("RISK_COOLDOWN_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(60 * 60)
+        .max(60);
+    StdDuration::from_secs(secs)
+}
+
 fn cooldown_remaining_secs(entry: &CredentialEntry) -> u64 {
     entry
         .cooldown_until
@@ -1403,7 +1412,15 @@ impl MultiTokenManager {
     /// 429 是账号级临时限流，不计入连续失败；这里临时冷却该账号并清理
     /// sticky 绑定，让下一次重试能切到其他可用账号。
     pub fn report_rate_limited(&self, id: u64) -> bool {
-        let cooldown = rate_limit_cooldown();
+        self.report_cooldown(id, rate_limit_cooldown(), "429 限流")
+    }
+
+    /// 报告指定凭据触发风控/临时限制。
+    pub fn report_risk_controlled(&self, id: u64) -> bool {
+        self.report_cooldown(id, risk_control_cooldown(), "风控临时限制")
+    }
+
+    fn report_cooldown(&self, id: u64, cooldown: StdDuration, label: &str) -> bool {
         let result = {
             let mut entries = self.entries.lock();
             let mut current_id = self.current_id.lock();
@@ -1412,8 +1429,9 @@ impl MultiTokenManager {
                 entry.cooldown_until = Some(Instant::now() + cooldown);
                 entry.last_used_at = Some(Utc::now().to_rfc3339());
                 tracing::warn!(
-                    "凭据 #{} 触发 429 限流，冷却 {} 秒后再参与调度",
+                    "凭据 #{} 触发{}，冷却 {} 秒后再参与调度",
                     id,
+                    label,
                     cooldown.as_secs()
                 );
             }
@@ -1426,7 +1444,8 @@ impl MultiTokenManager {
                 {
                     *current_id = next.id;
                     tracing::info!(
-                        "429 后已切换到凭据 #{}（优先级 {}）",
+                        "{}后已切换到凭据 #{}（优先级 {}）",
+                        label,
                         next.id,
                         next.credentials.priority
                     );
@@ -1571,7 +1590,7 @@ impl MultiTokenManager {
         // 选择优先级最高的未禁用凭据（排除当前凭据）
         if let Some(next) = entries
             .iter()
-            .filter(|e| !e.disabled && e.id != *current_id)
+            .filter(|e| !e.disabled && e.id != *current_id && !is_in_cooldown(e))
             .min_by_key(|e| (e.credentials.priority, e.id))
         {
             *current_id = next.id;
